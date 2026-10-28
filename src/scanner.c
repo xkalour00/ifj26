@@ -7,16 +7,41 @@
  */
 
 #include "token.h"
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #define SCANNER_RETURN_SUCCESS 0
 #define SCANNER_RETURN_FAILURE -1
 
 int parentheses = 0;
 
+bool is_keyword(const char *str, token_type_t *type) {
+  char *keywords[] = {"def", "do",     "Double",  "else", "if",    "import",
+                      "Int", "return", "String",  "then", "Unit",  "val",
+                      "var", "while",  "Boolean", "case", "class", "extension",
+                      "for", "List",   "match",   "type", NULL};
+
+  token_type_t types[] = {
+      KW_DEF, KW_DO,     KW_DOUBLE,  KW_ELSE, KW_IF,    KW_IMPORT,
+      KW_INT, KW_RETURN, KW_STRING,  KW_THEN, KW_UNIT,  KW_VAL,
+      KW_VAR, KW_WHILE,  KW_BOOLEAN, KW_CASE, KW_CLASS, KW_EXTENSION,
+      KW_FOR, KW_LIST,   KW_MATCH,   KW_TYPE};
+
+  for (int i = 0; keywords[i] != NULL; i++) {
+    if (strcmp(str, keywords[i]) == 0) {
+      *type = types[i];
+      return true;
+    }
+  }
+  return false;
+}
+
 int get_next_token(token_t **token) {
   int state = 0;
+  char buffer[256];
+  int buffer_index = 0;
 
   while (true) {
     int c = getc(stdin);
@@ -66,6 +91,11 @@ int get_next_token(token_t **token) {
         return SCANNER_RETURN_SUCCESS;
       } else if (c == '@') {
         state = 6;
+      } else if (c == '_') {
+        state = 10;
+      } else if (isalpha(c)) {
+        buffer[buffer_index++] = c;
+        state = 11;
       } else {
         return SCANNER_RETURN_FAILURE;
       }
@@ -136,6 +166,34 @@ int get_next_token(token_t **token) {
         return SCANNER_RETURN_SUCCESS;
       } else
         return SCANNER_RETURN_FAILURE;
+      break;
+    case 10:
+      if (isalpha(c) || isdigit(c) || c == '_') {
+        buffer[buffer_index++] = '_';
+        buffer[buffer_index++] = c;
+        state = 11;
+      } else {
+        ungetc(c, stdin);
+        token_init(token, SP_UNDERSCORE);
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 11:
+      if (isalpha(c) || isdigit(c) || c == '_') {
+        buffer[buffer_index++] = c;
+        state = 11;
+      } else {
+        ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_type_t type;
+        if (is_keyword(buffer, &type))
+          token_init(token, type);
+        else {
+          token_init(token, IDENTIFIER);
+          token_set_string(*token, buffer);
+        }
+        return SCANNER_RETURN_SUCCESS;
+      }
       break;
     default:
       return SCANNER_RETURN_FAILURE;
