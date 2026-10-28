@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SCANNER_RETURN_SUCCESS 0
@@ -98,6 +99,14 @@ int get_next_token(token_t **token) {
         state = 11;
       } else if (c == '\"') {
         state = 12;
+      } else if (c == '0') {
+        buffer[buffer_index++] = c;
+        state = 19;
+      } else if (isdigit(c) && c != '0') {
+        buffer[buffer_index++] = c;
+        state = 24;
+      } else if (c == '.') {
+        state = 29;
       } else {
         return SCANNER_RETURN_FAILURE;
       }
@@ -285,6 +294,128 @@ int get_next_token(token_t **token) {
       } else
         return SCANNER_RETURN_FAILURE;
       break;
+    case 19:
+      if (c == '.') {
+        buffer[buffer_index++] = c;
+        state = 26;
+      } else if (c == 'e' || c == 'E') {
+        buffer[buffer_index++] = c;
+        state = 20;
+      } else {
+        ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_init(token, INTEGER);
+        token_set_int(*token, strtoll(buffer, NULL, 10));
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 20:
+      if (c == '+' || c == '-') {
+        buffer[buffer_index++] = c;
+        state = 21;
+      } else if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 22;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 21:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 22;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 22:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 22;
+      } else if (c == '_')
+        state = 23;
+      else {
+        if (c != 'd' && c != 'D')
+          ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_init(token, DOUBLE);
+        token_set_double(*token, strtod(buffer, NULL));
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 23:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 22;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+      //----
+    case 24:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 24;
+      } else if (c == '_')
+        state = 25;
+      else if (c == 'e' || c == 'E') {
+        buffer[buffer_index++] = c;
+        state = 20;
+      } else if (c == '.') {
+        buffer[buffer_index++] = c;
+        state = 26;
+      } else {
+        ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_init(token, INTEGER);
+        token_set_int(*token, strtoll(buffer, NULL, 10));
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 25:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 24;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 26:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 27;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 27:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 27;
+      } else if (c == '_')
+        state = 28;
+      else {
+        if (c != 'd' && c != 'D')
+          ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_init(token, DOUBLE);
+        token_set_double(*token, strtod(buffer, NULL));
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 28:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = c;
+        state = 27;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 29:
+      if (isdigit(c)) {
+        buffer[buffer_index++] = '0';
+        buffer[buffer_index++] = '.';
+        buffer[buffer_index++] = c;
+        state = 27;
+      } else {
+        ungetc(c, stdin);
+        token_init(token, SP_DOT);
+        return SCANNER_RETURN_SUCCESS;
+      }
     default:
       return SCANNER_RETURN_FAILURE;
     }
