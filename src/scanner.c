@@ -96,6 +96,8 @@ int get_next_token(token_t **token) {
       } else if (isalpha(c)) {
         buffer[buffer_index++] = c;
         state = 11;
+      } else if (c == '\"') {
+        state = 12;
       } else {
         return SCANNER_RETURN_FAILURE;
       }
@@ -194,6 +196,94 @@ int get_next_token(token_t **token) {
         }
         return SCANNER_RETURN_SUCCESS;
       }
+      break;
+    case 12:
+      if (c == '\"')
+        state = 15;
+      else if (c == '\\')
+        state = 14;
+      else if (c != '\n' && c != EOF) {
+        buffer[buffer_index++] = c;
+        state = 13;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 13:
+      if (c != '\n' && c != EOF) {
+        buffer[buffer_index++] = c;
+        state = 13;
+      } else if (c == '\\')
+        state = 14;
+      else if (c == '\"') {
+        buffer[buffer_index] = '\0';
+        token_init(token, STRING);
+        token_set_string(*token, buffer);
+        return SCANNER_RETURN_SUCCESS;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 14:
+      if (c == '\\') {
+        buffer[buffer_index++] = '\\';
+        state = 13;
+      } else if (c == '\"') {
+        buffer[buffer_index++] = '\"';
+        state = 13;
+      } else if (c == 'n') {
+        buffer[buffer_index++] = '\n';
+        state = 13;
+      } else if (c == 'r') {
+        buffer[buffer_index++] = '\r';
+        state = 13;
+      } else if (c == 't') {
+        buffer[buffer_index++] = '\t';
+        state = 13;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 15:
+      if (c == '\"')
+        state = 16;
+      else {
+        ungetc(c, stdin);
+        buffer[buffer_index] = '\0';
+        token_init(token, STRING);
+        token_set_string(*token, buffer);
+        return SCANNER_RETURN_SUCCESS;
+      }
+      break;
+    case 16:
+      if (c == '\"') {
+        state = 17;
+      } else if (c != EOF) {
+        buffer[buffer_index++] = c;
+        state = 16;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 17:
+      if (c == '\"') {
+        state = 18;
+      } else if (c != EOF) {
+        ungetc(c, stdin);
+        buffer[buffer_index++] = '\"';
+        state = 16;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 18:
+      if (c == '\"') {
+        buffer[buffer_index] = '\0';
+        token_init(token, STRING);
+        token_set_string(*token, buffer);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (c != EOF) {
+        ungetc(c, stdin);
+        buffer[buffer_index++] = '\"';
+        buffer[buffer_index++] = '\"';
+        state = 16;
+      } else
+        return SCANNER_RETURN_FAILURE;
       break;
     default:
       return SCANNER_RETURN_FAILURE;
