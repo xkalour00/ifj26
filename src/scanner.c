@@ -6,6 +6,7 @@
  * @date 2026-10-28
  */
 
+#include "stack.h"
 #include "token.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -17,6 +18,10 @@
 #define SCANNER_RETURN_FAILURE -1
 
 int parentheses = 0;
+int pending_dedents = 0;
+bool pending_divide = false;
+bool count_spaces = false;
+stack_t *indent_stack = NULL;
 
 bool is_keyword(const char *str, token_type_t *type) {
   char *keywords[] = {"def", "do",     "Double",  "else", "if",    "import",
@@ -43,6 +48,26 @@ int get_next_token(token_t **token) {
   int state = 0;
   char buffer[256];
   int buffer_index = 0;
+  int star_count = 0;
+  bool has_nl = false;
+  int tmp_spaces = 0;
+  bool has_tab = false;
+
+  if (pending_dedents > 0) {
+    pending_dedents--;
+    token_init(token, SP_DEDENT);
+    return SCANNER_RETURN_SUCCESS;
+  }
+
+  if (pending_divide) {
+    pending_divide = false;
+    token_init(token, OP_DIVIDE);
+    return SCANNER_RETURN_SUCCESS;
+  }
+
+  if (count_spaces) {
+    state = 36;
+  }
 
   while (true) {
     int c = getc(stdin);
@@ -51,9 +76,14 @@ int get_next_token(token_t **token) {
       if (c == ' ' || c == '\t')
         state = 0; // eating whitespaces
       else if (c == '\n') {
-        // TODO: toggle count_spaces and relevant variables for indendation
-        token_init(token, SP_EOL);
-        return SCANNER_RETURN_SUCCESS;
+        if (parentheses == 0) {
+          count_spaces = true;
+          tmp_spaces = 0;
+          has_tab = false;
+          token_init(token, SP_EOL);
+          return SCANNER_RETURN_SUCCESS;
+        } else
+          state = 0;
       } else if (c == EOF) {
         state = 1;
       } else if (c == '+') {
@@ -107,14 +137,27 @@ int get_next_token(token_t **token) {
         state = 24;
       } else if (c == '.') {
         state = 29;
+      } else if (c == '/') {
+        state = 30;
       } else {
         return SCANNER_RETURN_FAILURE;
       }
       break;
-
     case 1: // EOF handling
-      // TODO: pop indent/dedent stack and set relevant pending variables
-      return SCANNER_RETURN_SUCCESS;
+      while (*(int *)stack_top(indent_stack) > 0) {
+        stack_pop(indent_stack);
+        pending_dedents++;
+      }
+      if (pending_dedents == 0) {
+        token_init(token, SP_EOF);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (pending_dedents > 0) {
+        pending_dedents--;
+        token_init(token, SP_DEDENT);
+        return SCANNER_RETURN_SUCCESS;
+      } else {
+        return SCANNER_RETURN_FAILURE;
+      }
       break;
     case 2: // NOT EQUAL
       if (c == '=') {
@@ -416,10 +459,160 @@ int get_next_token(token_t **token) {
         token_init(token, SP_DOT);
         return SCANNER_RETURN_SUCCESS;
       }
+      break;
+    case 30:
+      if (c == '/')
+        state = 31;
+      else if (c == '*') {
+        star_count = 1;
+        has_nl = false;
+        state = 32;
+      } else if (count_spaces) {
+        ungetc(c, stdin);
+        pending_divide = true;
+        state = 36;
+      } else if (!count_spaces) {
+        ungetc(c, stdin);
+        token_init(token, OP_DIVIDE);
+        return SCANNER_RETURN_SUCCESS;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 31:
+      if (c == '\n') {
+        count_spaces = true;
+        tmp_spaces = 0;
+        has_tab = false;
+        token_init(token, SP_EOL);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (c == EOF)
+        state = 1;
+      else
+        state = 31;
+      break;
+    case 32:
+      if (c == '/')
+        state = 33;
+      else if (c == '*')
+        state = 34;
+      else if (c == '\n') {
+        has_nl = true;
+        state = 32;
+      } else if (c != EOF)
+        state = 32;
+      else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 33:
+      if (c == '*') {
+        star_count++;
+        state = 32;
+      } else if (c == '\n') {
+        has_nl = true;
+        state = 32;
+      } else if (c != EOF) {
+        state = 32;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 34:
+      if (c == '*')
+        state = 34;
+      else if (c == '/') {
+        star_count--;
+        if (star_count == 0) {
+          if (has_nl)
+            state = 35;
+          else if (count_spaces)
+            state = 36;
+          else if (!count_spaces)
+            state = 0;
+        } else
+          state = 32;
+      } else if (c != EOF)
+        state = 32;
+      else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 35:
+      if (c == ' ')
+        state = 35;
+      else if (c == '\n') {
+        count_spaces = true;
+        tmp_spaces = 0;
+        has_tab = false;
+        token_init(token, SP_EOL);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (c == EOF)
+        state = 1;
+      else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 36:
+      if (c == '/')
+        state = 30;
+      else if (c == ' ') {
+        tmp_spaces++;
+        state = 36;
+      } else if (c == '\t') {
+        has_tab = true;
+        state = 36;
+      } else if (c == '\n') {
+        count_spaces = true;
+        tmp_spaces = 0;
+        has_tab = false;
+        token_init(token, SP_EOL);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (c == EOF)
+        state = 1;
+      else if (!has_tab) {
+        ungetc(c, stdin);
+        count_spaces = false;
+        state = 37;
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
+    case 37:
+      if (tmp_spaces == *(int *)stack_top(indent_stack))
+        state = 0;
+      else if (tmp_spaces > *(int *)stack_top(indent_stack)) {
+        stack_push(indent_stack, &tmp_spaces);
+        token_init(token, SP_INDENT);
+        return SCANNER_RETURN_SUCCESS;
+      } else if (tmp_spaces < *(int *)stack_top(indent_stack)) {
+        while (tmp_spaces < *(int *)stack_top(indent_stack)) {
+          if (*(int *)stack_top(indent_stack) == 0)
+            return SCANNER_RETURN_FAILURE;
+          stack_pop(indent_stack);
+          pending_dedents++;
+        }
+        if (tmp_spaces == *(int *)stack_top(indent_stack)) {
+          pending_dedents--;
+          token_init(token, SP_DEDENT);
+          return SCANNER_RETURN_SUCCESS;
+        }
+      } else
+        return SCANNER_RETURN_FAILURE;
+      break;
     default:
       return SCANNER_RETURN_FAILURE;
     }
   }
 
-  return 0;
+  return SCANNER_RETURN_FAILURE; // should not be reachable
+}
+
+int scanner_init() {
+  if (stack_init(&indent_stack, sizeof(int)) != 0)
+    return SCANNER_RETURN_FAILURE;
+
+  int indent_base = 0;
+  stack_push(indent_stack, &indent_base);
+
+  return SCANNER_RETURN_SUCCESS;
+}
+
+void scanner_free() {
+  stack_free(indent_stack);
+  indent_stack = NULL;
 }
