@@ -23,7 +23,7 @@
 typedef struct {
   char *buffer;
   size_t size;
-  int index;
+  size_t index;
 } buffer_t;
 
 typedef struct {
@@ -31,12 +31,19 @@ typedef struct {
   token_type_t keyword_type;
 } keyword_mapping_t;
 
-static int parentheses = 0;
-static int pending_dedents = 0;
-static bool pending_divide = false;
-static bool count_spaces = false;
-static stack_t *indent_stack = NULL;
-static buffer_t *buffer = NULL;
+static int parentheses = 0;     // used to track parentheses
+static int pending_dedents = 0; // used for tracking dedents that need to be
+                                // returned from previous runs of the scanner
+static bool pending_divide =
+    false; // used to track if a divide token needs to be returned from previous
+           // run of the scanner
+static bool count_spaces = true; // used to track if the scanner is currently
+                                 // counting spaces for indentation
+static stack_t *indent_stack = NULL; // indendation level stack
+static buffer_t *buffer = NULL; // buffer for filling token values (strings,
+                                // ints/doubles, identifiers, etc.)
+static bool was_last_token_eol =
+    true; // used to prevent multiple EOL tokens in a row
 
 /**
  * @brief Add a character to the buffer
@@ -46,7 +53,8 @@ static buffer_t *buffer = NULL;
  * SCANNER_RETURN_FAILURE otherwise
  */
 int buffer_add_char(buffer_t *buffer, char c) {
-  if (buffer->index >= buffer->size - 1) {
+  if (buffer->index >=
+      buffer->size - 1) { // doubles the buffer size if it's full
     size_t new_size = buffer->size * 2;
     char *new_buffer = realloc(buffer->buffer, new_size);
     if (new_buffer == NULL) {
@@ -79,29 +87,29 @@ void buffer_reset(buffer_t *buffer) {
  * @return true if the string is a keyword, false otherwise
  */
 bool is_keyword(const char *str, token_type_t *type) {
-  keyword_mapping_t keywords[] = {{"def", KW_DEF},
-                                  {"do", KW_DO},
-                                  {"Double", KW_DOUBLE},
-                                  {"else", KW_ELSE},
-                                  {"if", KW_IF},
-                                  {"import", KW_IMPORT},
-                                  {"Int", KW_INT},
-                                  {"return", KW_RETURN},
-                                  {"String", KW_STRING},
-                                  {"then", KW_THEN},
-                                  {"Unit", KW_UNIT},
-                                  {"val", KW_VAL},
-                                  {"var", KW_VAR},
-                                  {"while", KW_WHILE},
-                                  {"Boolean", KW_BOOLEAN},
-                                  {"case", KW_CASE},
-                                  {"class", KW_CLASS},
-                                  {"extension", KW_EXTENSION},
-                                  {"for", KW_FOR},
-                                  {"List", KW_LIST},
-                                  {"match", KW_MATCH},
-                                  {"type", KW_TYPE},
-                                  {NULL, 0}};
+  static const keyword_mapping_t keywords[] = {{"def", KW_DEF},
+                                               {"do", KW_DO},
+                                               {"Double", KW_DOUBLE},
+                                               {"else", KW_ELSE},
+                                               {"if", KW_IF},
+                                               {"import", KW_IMPORT},
+                                               {"Int", KW_INT},
+                                               {"return", KW_RETURN},
+                                               {"String", KW_STRING},
+                                               {"then", KW_THEN},
+                                               {"Unit", KW_UNIT},
+                                               {"val", KW_VAL},
+                                               {"var", KW_VAR},
+                                               {"while", KW_WHILE},
+                                               {"Boolean", KW_BOOLEAN},
+                                               {"case", KW_CASE},
+                                               {"class", KW_CLASS},
+                                               {"extension", KW_EXTENSION},
+                                               {"for", KW_FOR},
+                                               {"List", KW_LIST},
+                                               {"match", KW_MATCH},
+                                               {"type", KW_TYPE},
+                                               {NULL, 0}};
 
   for (int i = 0; keywords[i].keyword != NULL; i++) {
     if (strcmp(str, keywords[i].keyword) == 0) {
@@ -176,70 +184,90 @@ int get_next_token(token_t **token) {
           count_spaces = true;
           tmp_spaces = 0;
           has_tab = false;
-          token_init(token, SP_EOL);
-          return SCANNER_RETURN_SUCCESS;
+          if (!was_last_token_eol) {
+            was_last_token_eol = true;
+            token_init(token, SP_EOL);
+            return SCANNER_RETURN_SUCCESS;
+          } else {
+            count_spaces = true;
+            tmp_spaces = 0;
+            has_tab = false;
+            state = 36;
+          }
         } else
           state = 0;
       } else if (c == EOF) {
         state = 1;
-      } else if (c == '+') {
-        token_init(token, OP_PLUS);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == '-') {
-        token_init(token, OP_MINUS);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == '*') {
-        token_init(token, OP_MULTIPLY);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == '(') {
-        parentheses++;
-        token_init(token, SP_OPENING_PARENTHESIS);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == ')') {
-        parentheses--;
-        token_init(token, SP_CLOSING_PARENTHESIS);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == '!') {
-        state = 2;
-      } else if (c == '>') {
-        state = 3;
-      } else if (c == '<') {
-        state = 4;
-      } else if (c == '=') {
-        state = 5;
       } else if (c == ';') {
-        token_init(token, SP_SEMICOLON);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == ',') {
-        token_init(token, SP_COMMA);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == ':') {
-        token_init(token, SP_COLON);
-        return SCANNER_RETURN_SUCCESS;
-      } else if (c == '@') {
-        state = 6;
-      } else if (c == '_') {
-        state = 10;
-      } else if (isalpha(c)) {
-        buffer_add_char(buffer, c);
-        state = 11;
-      } else if (c == '\"') {
-        state = 12;
-      } else if (c == '0') {
-        buffer_add_char(buffer, c);
-        state = 19;
-      } else if (isdigit(c) && c != '0') {
-        buffer_add_char(buffer, c);
-        state = 24;
-      } else if (c == '.') {
-        state = 29;
-      } else if (c == '/') {
+        if (!was_last_token_eol) {
+          was_last_token_eol = true;
+          token_init(token, SP_EOL);
+          return SCANNER_RETURN_SUCCESS;
+        }
+      } else if (c == '/')
         state = 30;
-      } else {
-        return SCANNER_RETURN_FAILURE;
+      else {
+        was_last_token_eol = false;
+
+        if (c == '+') {
+          token_init(token, OP_PLUS);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == '-') {
+          token_init(token, OP_MINUS);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == '*') {
+          token_init(token, OP_MULTIPLY);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == '(') {
+          parentheses++;
+          token_init(token, SP_OPENING_PARENTHESIS);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == ')') {
+          parentheses--;
+          token_init(token, SP_CLOSING_PARENTHESIS);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == '!') {
+          state = 2;
+        } else if (c == '>') {
+          state = 3;
+        } else if (c == '<') {
+          state = 4;
+        } else if (c == '=') {
+          state = 5;
+        } else if (c == ',') {
+          token_init(token, SP_COMMA);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == ':') {
+          token_init(token, SP_COLON);
+          return SCANNER_RETURN_SUCCESS;
+        } else if (c == '@') {
+          state = 6;
+        } else if (c == '_') {
+          state = 10;
+        } else if (isalpha(c)) {
+          buffer_add_char(buffer, c);
+          state = 11;
+        } else if (c == '\"') {
+          state = 12;
+        } else if (c == '0') {
+          buffer_add_char(buffer, c);
+          state = 19;
+        } else if (isdigit(c) && c != '0') {
+          buffer_add_char(buffer, c);
+          state = 24;
+        } else if (c == '.') {
+          state = 29;
+        } else {
+          return SCANNER_RETURN_FAILURE;
+        }
       }
       break;
     case 1: // -- EOF
+      if (!was_last_token_eol) {
+        was_last_token_eol = true;
+        token_init(token, SP_EOL);
+        return SCANNER_RETURN_SUCCESS;
+      }
       while (*(int *)stack_top(indent_stack) > 0) {
         stack_pop(indent_stack);
         pending_dedents++;
@@ -430,7 +458,9 @@ int get_next_token(token_t **token) {
         return SCANNER_RETURN_FAILURE;
       break;
     case 19: // -- INTEGER (starting 0)
-      if (c == '.') {
+      if (isdigit(c) || c == '_') {
+        return SCANNER_RETURN_FAILURE;
+      } else if (c == '.') {
         buffer_add_char(buffer, c);
         state = 26;
       } else if (c == 'e' || c == 'E') {
@@ -563,8 +593,20 @@ int get_next_token(token_t **token) {
         state = 32;
       } else if (count_spaces) {
         ungetc(c, stdin);
-        pending_divide = true;
-        state = 36;
+        count_spaces = false;
+
+        if (tmp_spaces == *(int *)stack_top(indent_stack)) {
+          token_init(token, OP_DIVIDE);
+          return SCANNER_RETURN_SUCCESS;
+        } else {
+          token_type_t type;
+          int to_return = handle_indents(tmp_spaces, &type);
+          if (to_return == SCANNER_RETURN_SUCCESS) {
+            token_init(token, type);
+            pending_divide = true;
+          }
+          return to_return;
+        }
       } else if (!count_spaces) {
         ungetc(c, stdin);
         token_init(token, OP_DIVIDE);
@@ -574,11 +616,23 @@ int get_next_token(token_t **token) {
       break;
     case 31: // -- COMMENT (single-line)
       if (c == '\n') {
+        if (parentheses > 0) {
+          state = 0;
+          break;
+        }
         count_spaces = true;
         tmp_spaces = 0;
         has_tab = false;
-        token_init(token, SP_EOL);
-        return SCANNER_RETURN_SUCCESS;
+        if (!was_last_token_eol) {
+          was_last_token_eol = true;
+          token_init(token, SP_EOL);
+          return SCANNER_RETURN_SUCCESS;
+        } else {
+          count_spaces = true;
+          tmp_spaces = 0;
+          has_tab = false;
+          state = 36;
+        }
       } else if (c == EOF)
         state = 1;
       else
@@ -615,11 +669,13 @@ int get_next_token(token_t **token) {
       else if (c == '/') {
         star_count--;
         if (star_count == 0) {
-          if (has_nl)
+          if (parentheses > 0)
+            state = 0;
+          else if (has_nl)
             state = 35;
           else if (count_spaces)
             state = 36;
-          else if (!count_spaces)
+          else
             state = 0;
         } else
           state = 32;
@@ -635,8 +691,16 @@ int get_next_token(token_t **token) {
         count_spaces = true;
         tmp_spaces = 0;
         has_tab = false;
-        token_init(token, SP_EOL);
-        return SCANNER_RETURN_SUCCESS;
+        if (!was_last_token_eol) {
+          was_last_token_eol = true;
+          token_init(token, SP_EOL);
+          return SCANNER_RETURN_SUCCESS;
+        } else {
+          count_spaces = true;
+          tmp_spaces = 0;
+          has_tab = false;
+          state = 36;
+        }
       } else if (c == EOF)
         state = 1;
       else
@@ -655,8 +719,15 @@ int get_next_token(token_t **token) {
         count_spaces = true;
         tmp_spaces = 0;
         has_tab = false;
-        token_init(token, SP_EOL);
-        return SCANNER_RETURN_SUCCESS;
+        if (!was_last_token_eol) {
+          was_last_token_eol = true;
+          token_init(token, SP_EOL);
+          return SCANNER_RETURN_SUCCESS;
+        } else {
+          tmp_spaces = 0;
+          has_tab = false;
+          state = 36;
+        }
       } else if (c == EOF)
         state = 1;
       else if (!has_tab) {
@@ -668,7 +739,8 @@ int get_next_token(token_t **token) {
         else {
           token_type_t type;
           int to_return = handle_indents(tmp_spaces, &type);
-          token_init(token, type);
+          if (to_return == SCANNER_RETURN_SUCCESS)
+            token_init(token, type);
           return to_return;
         }
       } else

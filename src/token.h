@@ -59,7 +59,6 @@ typedef enum token_type {
   SP_EOF,
   SP_MAIN,
   SP_COLON,
-  SP_SEMICOLON,
   SP_COMMA,
   SP_DOT,
   SP_UNDERSCORE,
