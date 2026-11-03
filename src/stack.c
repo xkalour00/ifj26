@@ -75,6 +75,22 @@ void *stack_top(const stack_t *stack) {
   return stack->top->data;
 }
 
+void *stack_get(const stack_t *stack, size_t index) {
+  if (stack == NULL || index < 0) {
+    return NULL;
+  }
+  stack_element_t *current = stack->top;
+  while (current != NULL && index > 0) {
+    current = current->next;
+    index--;
+  }
+  if (current) {
+    return current->data;
+  } else {
+    return NULL;
+  }
+}
+
 int stack_is_empty(const stack_t *stack) {
   if (stack == NULL) {
     return STACK_RETURN_FAILURE;

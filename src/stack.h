@@ -57,6 +57,17 @@ int stack_pop(stack_t *stack);
 void *stack_top(const stack_t *stack);
 
 /**
+ * @brief Get the element at the specified index in the stack
+ *
+ *@param[in] stack The stack to get the element from
+ *@param[in] index The index of the element to get (0 is the top of the stack)
+ *
+ * @return Pointer to the element at the specified index on success, NULL on
+ * error
+ */
+void *stack_get(const stack_t *stack, size_t index);
+
+/**
  * @brief Check if the stack is empty
  *
  * @param[in] stack The stack to check
