@@ -11,10 +11,27 @@
 
 #include "token.h"
 #include "ast.h"
+#include "hashtable.h"
+#include "precedence_parser.h"
 
 #define LEXICAL_ERROR 1
 #define SYNTAX_ERROR 2
 #define MALLOC_FAIL 99
+#define USING_NOT_DEFINED_VARIABLE 3
+#define REDEFINITION 4
+#define ASSIGN_TO_CONST 7  
+
+
+extern hashtable_t *symtable;
+
+
+typedef struct {
+    bool is_function;          
+    ast_node_t *declaration;              
+    bool is_const;  // var or val
+} symbol_t;
+
+char* make_unique_name(char* name);
 
 
 /**

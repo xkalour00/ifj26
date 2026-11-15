@@ -14,6 +14,7 @@
 #include "scanner.h"
 #include "ast.h"
 #include <string.h>
+#include <stdlib.h>
 
 
 /**
@@ -203,7 +204,8 @@ static void reduce(stack_t *stack,stack_t *nodes){
     if(depth == 3){
         if(stack_reversed[0] == E && stack_reversed[1] == UMINUS ){
             ast_node_t *operand = stack_pop_node(nodes);
-            stack_push_node(nodes, make_binary_tree(AST_SUBTRACTION, NULL, operand));
+            int64_t zero = 0;
+            stack_push_node(nodes, make_binary_tree(AST_SUBTRACTION, make_node(AST_INTEGER, &zero), operand));
             stack_push_symbol(stack,E);
             return;
         }
@@ -286,7 +288,8 @@ ast_node_t *parse_precedence(char* identifier_consumed){
            stack_push_node(node_stack, make_func_call_tree(make_node(AST_LEAF, identifier_consumed), parse_precedence_arguments()));
        }
     else{
-        stack_push_node(node_stack, make_node(AST_LEAF, identifier_consumed));
+        stack_push_node(node_stack, make_node(AST_LEAF, make_unique_name(identifier_consumed)));
+        free(identifier_consumed);
     }
     }
     bool previous_operand = identifier_consumed == NULL ? false : true; //proste ked bol zjedeny operand tak je to true
@@ -346,7 +349,8 @@ ast_node_t *parse_precedence(char* identifier_consumed){
                 operand = make_func_call_tree(make_node(AST_LEAF,name), parse_precedence_arguments());
             }
             else if(old == IDENTIFIER){
-                operand = make_node(AST_LEAF, name);
+                operand = make_node(AST_LEAF, make_unique_name(name));
+                free(name);
             }
 
             if(b == I){

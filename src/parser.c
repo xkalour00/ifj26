@@ -23,6 +23,9 @@ token_t *current_token_parser = NULL;
 token_type_t current_token_type_parser;
 static ast_node_t *root;
 
+
+
+
 static void parse_prolog(void);
 static ast_node_t* parse_function_list(ast_node_t *root);
 static ast_node_t* parse_function(void);
@@ -46,10 +49,120 @@ static ast_node_t* parse_if();
 static ast_node_t* parse_while(void);
 static ast_node_t* parse_id_expr_or_funcall(void);
 
+
+
+//symtable things
+#define MAX_SCOPE_COUNT 10000
+#define EXTRA_SPACE 20
+
+hashtable_t *symtable = NULL;
+// track of available scopes for a variable
+static int scopes[MAX_SCOPE_COUNT]; 
+static int depth_count = 0; 
+static int next_scope = 0;
+
+
+/**
+ * @brief adds a scope with index next_scope and increases depth
+ */
+
+
+static void scope_push(){
+    if(depth_count == MAX_SCOPE_COUNT) fail(MALLOC_FAIL);
+    scopes[depth_count] = next_scope; 
+    depth_count += 1;
+    next_scope += 1;
+}
+
+/**
+ * @brief decreases depth of scopes
+ */
+
+static void scope_pop(){
+    depth_count--;
+}
+
+
+/**
+ * @brief searches for a symbol in symtable with the biggest scope that matches the name
+ * @param name the name
+ */
+
+static symbol_t* find_symbol(char *name){
+    char key[strlen(name) + EXTRA_SPACE];
+
+    for(int i = depth_count-1;i>=0;i--){
+        sprintf(key,"%s$%d",name,scopes[i]);
+        void *found;
+        if(hashtable_find(symtable, key, &found) == 0) return found;
+    }
+    return NULL;
+}
+
+/**
+ * @brief adds to symtable
+ * @param node what is being added
+ * @param is_function is it a function?
+ * @param is_const is it val or var?
+ */
+
+static void add_to_symtable(ast_node_t *node, bool is_function, bool is_const){
+    char *name;
+    if(is_function){
+        name = node->data.func_def.name;
+    }
+    else{
+        name = node->data.declaration.name;
+    }
+
+    char key[strlen(name) + EXTRA_SPACE];
+    if(is_function){
+        strcpy(key, name);                                     
+    }
+    else{
+        sprintf(key, "%s$%d", name, scopes[depth_count - 1]);   
+    }
+
+    void *found;
+    if(hashtable_find(symtable, key, &found) == 0) fail(REDEFINITION);
+
+    symbol_t *symbol = malloc(sizeof(symbol_t));
+    if(symbol == NULL) fail(MALLOC_FAIL);
+    symbol->is_function = is_function;
+    symbol->declaration = node;
+    symbol->is_const = is_const;
+
+    if(hashtable_insert(symtable, key, symbol) != 0){
+        free(symbol);
+        fail(MALLOC_FAIL);
+    }
+    //dbg
+    //fprintf(stderr, "symtable: %-10s %s\n", key, is_function ? "function" : (is_const ? "val" : "var"));
+    if(!is_function){
+        free(node->data.declaration.name);
+        node->data.declaration.name = str_dup(key);
+    }
+}
+
+
+/**
+ * @brief makes the name$scope name 
+ * @param name the name
+ * @return unique name
+ */
+
+char* make_unique_name(char* name){
+    symbol_t* symbol = find_symbol(name);
+    if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
+    return str_dup(symbol->declaration->data.declaration.name);
+}
+
+
 void fail(int code){ 
   if (current_token_parser) token_free(current_token_parser);
   scanner_free();
   free_tree(root);
+  hashtable_free(symtable);
   exit(code);
 }
 
@@ -118,7 +231,11 @@ static ast_node_t* parse_function_list(ast_node_t* root){
         return root;
 
     case SP_MAIN:
-        add_func_def_tree(root,parse_function(),true);
+        ast_node_t *main = parse_function();
+        if(add_func_def_tree(root,main,true) != 0){
+            free_tree(main);
+            fail(REDEFINITION);
+        }
         parse_function_list(root);
         return root;
        
@@ -182,7 +299,7 @@ static int parse_type(void){
 
 /**
  * @brief parses <PARAM_EXISTING> -> id : <TYPE>
- * @return AST_VAR node with the parameter name and type and value set to NULL
+ * @return AST_DECLARATION node with the parameter name and type and value set to NULL
  */
 
 static ast_node_t* parse_param_existing(void){
@@ -195,10 +312,11 @@ static ast_node_t* parse_param_existing(void){
     return_type_t return_type = parse_type();
     ast_node_t *n = malloc(sizeof(ast_node_t));
     if(!n) fail(MALLOC_FAIL);
-    n->type = AST_VAR;
-    n->data.var.name = name;
-    n->data.var.return_type = return_type;
-    n->data.var.value = NULL;
+    n->type = AST_DECLARATION;
+    n->data.declaration.name = name;
+    n->data.declaration.return_type = return_type;
+    n->data.declaration.value = NULL;
+    add_to_symtable(n,false,true);
     return n;
 }
 
@@ -232,7 +350,7 @@ static ast_node_t* parse_params_c(ast_node_t *linked_list){
  * @brief parses <PARAMS> -> epsilon
  *               <PARAMS> -> <PARAM_EXISTING> <PARAMS_C>
  *        recursion for multiple params
- * @return linked list of AST_VAR parameter nodes
+ * @return linked list of AST_DECLARATION parameter nodes
  */
 
 
@@ -292,11 +410,17 @@ static ast_node_t* parse_definition(void){
     char* name = str_dup(func_identidier);
     consume();
     expect(SP_OPENING_PARENTHESIS);
+
+    scope_push();
+
     ast_node_t * params = parse_params();
     expect(SP_CLOSING_PARENTHESIS);
     return_type_t return_type = parse_return_type();
     expect(OP_ASSIGN);
     ast_node_t *body = parse_def_body();
+
+    scope_pop();
+
     ast_node_t *n = malloc(sizeof(ast_node_t));
     if(!n) fail(MALLOC_FAIL);
     n->type = AST_FUNC_DEF;
@@ -304,6 +428,7 @@ static ast_node_t* parse_definition(void){
     n->data.func_def.parameters = params;
     n->data.func_def.return_type = return_type;
     n->data.func_def.tree_list = body;
+    add_to_symtable(n,true,true);
     return n;
 
 }
@@ -362,7 +487,13 @@ static ast_node_t* parse_def_body(void){
 
 static ast_node_t* parse_indented_block(){
     expect(SP_INDENT);
+
+    scope_push();
+
     ast_node_t* block = parse_block();
+
+    scope_pop();
+
     expect(SP_DEDENT);
     return block;
 }
@@ -385,7 +516,7 @@ static ast_node_t* parse_block(){
 
 /**
  * @brief parses <VAR> -> var id <RETURN_TYPE> = <EXPR> EOL 
- * @return AST_VAR node with name type and value
+ * @return AST_DECLARATION node with name type and value
  */
 
 
@@ -404,16 +535,17 @@ static ast_node_t* parse_var(){
 
     ast_node_t *n = malloc(sizeof(ast_node_t));
     if(!n) fail(MALLOC_FAIL);
-    n->type = AST_VAR;
-    n->data.var.name = name;
-    n->data.var.return_type = type;
-    n->data.var.value = expr;
+    n->type = AST_DECLARATION;
+    n->data.declaration.name = name;
+    n->data.declaration.return_type = type;
+    n->data.declaration.value = expr;
+    add_to_symtable(n,false,false);
     return n;
 }
 
 /**
  * @brief parses <VAL> -> val id <RETURN_TYPE> = <EXPR> EOL 
- * @return AST_VAL node with name type and value    
+ * @return AST_DECLARATION node with name type and value    
  */
 
 
@@ -432,10 +564,11 @@ static ast_node_t* parse_val(){
 
     ast_node_t *n = malloc(sizeof(ast_node_t));
     if(!n) fail(MALLOC_FAIL);
-    n->type = AST_VAL;
-    n->data.val.name = name;
-    n->data.val.return_type = type;
-    n->data.val.value = expr;
+    n->type = AST_DECLARATION;
+    n->data.declaration.name = name;
+    n->data.declaration.return_type = type;
+    n->data.declaration.value = expr;
+    add_to_symtable(n,false,true);
     return n;
 }
 
@@ -531,14 +664,22 @@ static ast_node_t* parse_id_expr_or_funcall(){
             expect(SP_EOL);
             return call;
         case OP_ASSIGN:
+            symbol_t *symbol = find_symbol(name);
+            if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
+            //im in assign cant be const
+            if(symbol->is_const) fail(ASSIGN_TO_CONST);
             consume();
             ast_node_t* expr = parse_precedence(NULL);
-            ast_node_t* assigment_name = make_node(AST_LEAF,name);
+            ast_node_t* assigment_name = make_node(AST_LEAF,make_unique_name(name));
+            free(name);
             expect(SP_EOL);
             return make_binary_tree(AST_ASSIGNMENT,assigment_name,expr);
         case SP_EOL:
             expect(SP_EOL);
-            return make_node(AST_LEAF,name);
+            ast_node_t *n  = make_node(AST_LEAF,make_unique_name(name));
+            free(name);
+            return n;
+            
 
         case OP_PLUS: 
         case OP_MINUS: 
@@ -636,7 +777,9 @@ static ast_node_t* parse_rest_block(ast_node_t* block){
 
 
 ast_node_t* parse(void) {
-    consume();               
+    consume();
+    hashtable_init(&symtable);
+    if(!symtable) fail(MALLOC_FAIL);               
     parse_prolog();
     root = make_root_node();
     parse_function_list(root);     
