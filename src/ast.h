@@ -3,14 +3,15 @@
  *
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Abstract Syntax Tree interface header
- * file
- * @date 2026-10-17
+ *
+ * @date 2026-11-17
  */
 
 #ifndef AST_H
 #define AST_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /**
  * @brief Enumeration of all types a node may become,
@@ -18,9 +19,10 @@
  */
 typedef enum {
   AST_INTEGER, // constant integer
-  AST_FLOAT,   // constant float
+  AST_DOUBLE,  // constant double
   AST_LEAF,    // leaf node (only ptr to symtable)
-  AST_BINARY,  // binary operation (+,-,=,< etc.)
+  AST_STRING,
+  AST_BINARY, // binary operation (+,-,=,< etc.)
   AST_LINKED_LIST,
   AST_LINKED_LIST_ITEM,
   AST_WHILE_LOOP,
@@ -28,6 +30,9 @@ typedef enum {
   AST_FUNC_DEF,
   AST_FUNC_CALL,
   AST_ROOT,
+  AST_RETURN,
+  AST_DECLARATION,
+  AST_UNIT,
 } ast_node_type_t;
 
 /**
@@ -40,11 +45,21 @@ typedef enum {
   AST_DIVISION,
   AST_ASSIGNMENT,
   AST_EQUAL,
+  AST_NEQUAL,
   AST_LEQUAL,
   AST_GEQUAL,
   AST_LESS,
   AST_GREATER,
 } ast_binary_type_t;
+
+typedef enum {
+  RETURN_NONE,
+  RETURN_DOUBLE,
+  RETURN_INT,
+  RETURN_STRING,
+  RETURN_UNIT,
+  RETURN_UNKNOWN, // For type checking, all returns must be known at codegen
+} return_type_t;
 
 /**
  * @brief Node connected to other nodes creates a tree,
@@ -54,9 +69,10 @@ typedef struct node {
   ast_node_type_t type;
 
   union {
-    int integer;
-    float fp;
-    void *leaf; // TODO: change to symtable type
+    int64_t integer;
+    double fp;
+    char *leaf; // Under what name we should search symtable
+    char *str;
     struct {
       ast_binary_type_t binary_type;
       struct node *left;
@@ -80,25 +96,35 @@ typedef struct node {
       struct node *else_block;
     } if_statement;
     struct {
-      void *return_value; // TODO: Might change the type
+      return_type_t return_type;
       struct node *parameters;
       struct node *tree_list;
+      char *name;
     } func_def;
     struct {
-      struct node *func_def_loc; // Where the function is defined
-      struct node *parameters;   // Expected to be a linked list
+      struct node *parameters; // Expected to be a linked list
+      char *name; // Used to find function definition through symtable
     } func_call;
     struct {
       struct node *main_func;
       struct node *func_def_list;
     } root;
+    struct {
+      struct node *value;
+    } return_node;
+    struct {
+      struct node *value;
+      char *name;
+      return_type_t return_type;
+    } declaration;
   } data;     // union
 } ast_node_t; // typedef struct node
 
 /**
  * @brief Create a node; Used for constant values and leaf nodes
  *
- * @param type Specifies type of node; INTEGER, FLOAT or LEAF are valid values
+ * @param type Specifies type of node; UNIT, LEAF, INTEGER, DOUBLE, STRING,
+ * RETURN are accepted
  * @param data Actual data the node contains, this depends on node type
  * @return ast_node_t* Pointer to newly created node, used for linking multiple
  * nodes together
@@ -166,23 +192,38 @@ int add_llist_item(ast_node_t *llist, ast_node_t *item);
 /**
  * @brief Create a node representing function call with specific paramters
  *
- * @param func_call Pointer to function definition
- * @param param List of parameters
+ * @param func_name Function name
+ * @param params List of parameters
  * @return ast_node_t* Pointer to function call node
  */
-ast_node_t *make_func_call_tree(ast_node_t *func_call, ast_node_t *param);
+ast_node_t *make_func_call_tree(char *func_name, ast_node_t *params);
 
 /**
  * @brief Add function definition to the AST root node
  *
  * @param root_node Root of the AST
- * @param func_root Root node of the function (where the definition begins)
+ * @param return_type What the function returns
+ * @param func_name Function name
+ * @param params Parameters passed to the function
+ * @param body Body of the function
  * @param is_main Whether the function is program's entry point (only one per
  * program)
  * @return int Return code; 0 on success, non-zero on failure
  */
-int add_func_def_tree(ast_node_t *root_node, ast_node_t *func_root,
+int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
+                      char *func_name, ast_node_t *params, ast_node_t *body,
                       bool is_main);
+
+/**
+ * @brief Create a new declaration
+ *
+ * @param name Declared variable/constant name
+ * @param return_type Variable type
+ * @param value Value represented as a tree
+ * @return ast_node_t* Pointer to the declaration node
+ */
+ast_node_t *make_declaration_node(char *name, return_type_t return_type,
+                                  ast_node_t *value);
 
 /**
  * @brief Deallocate memory used by passed node and its children
@@ -191,5 +232,13 @@ int add_func_def_tree(ast_node_t *root_node, ast_node_t *func_root,
  * root node itself)
  */
 void free_tree(ast_node_t *root);
+
+/**
+ * @brief Test AST for type irregularities
+ *
+ * @param root AST root node
+ * @return int Return code; 0 if tree is correct, non-zero otherwise
+ */
+int check_type_validity(ast_node_t *root);
 
 #endif // #ifndef AST_H
