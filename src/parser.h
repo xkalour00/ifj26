@@ -13,6 +13,7 @@
 #include "ast.h"
 #include "hashtable.h"
 #include "precedence_parser.h"
+#include "symtable.h"
 
 #define LEXICAL_ERROR 1
 #define SYNTAX_ERROR 2
@@ -22,14 +23,9 @@
 #define ASSIGN_TO_CONST 7  
 
 
-extern hashtable_t *symtable;
+extern symtable_t *symtable;
 
 
-typedef struct {
-    bool is_function;          
-    ast_node_t *declaration;              
-    bool is_const;  // var or val
-} symbol_t;
 
 char* make_unique_name(char* name);
 
