@@ -102,6 +102,11 @@ int symtable_scope_push(symtable_t *symtable) {
   return SYMTABLE_RETURN_SUCCESS;
 }
 
+void symtable_free_func(void *value) {
+  symbol_t *symbol = (symbol_t *)value;
+  free(symbol);
+}
+
 void symtable_scope_pop(symtable_t *symtable) {
   if (symtable == NULL || symtable->scope_level < 0) {
     return;
@@ -109,6 +114,7 @@ void symtable_scope_pop(symtable_t *symtable) {
 
   hashtable_t *current_scope = stack_top(symtable->scopes);
   if (current_scope != NULL) {
+    hashtable_clear(current_scope, symtable_free_func);
     hashtable_free(current_scope);
     stack_pop(symtable->scopes);
     symtable->scope_level--;
@@ -122,6 +128,7 @@ void symtable_free(symtable_t *symtable) {
 
   void *item = stack_top(symtable->scopes);
   while (item != NULL) {
+    hashtable_clear(item, symtable_free_func);
     hashtable_free(item);
     stack_pop(symtable->scopes);
     item = stack_top(symtable->scopes);

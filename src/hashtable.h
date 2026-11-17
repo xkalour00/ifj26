@@ -75,7 +75,15 @@ int hashtable_find_or_insert(hashtable_t *hashtable, const char *key,
  *
  * @return 0 on success, 1 on not found, others on failure
  */
-int hashtable_remove(hashtable_t *hashtable, const char *key);
+int hashtable_find_and_remove(hashtable_t *hashtable, const char *key);
+
+/**
+ * @brief Clears all items from the hashtable
+ *
+ * @param[in] hashtable Pointer to the hashtable to clear
+ * @param[in] free_func Function to free the values
+ */
+void hashtable_clear(hashtable_t *hashtable, void (*free_func)(void *));
 
 /**
  * @brief Frees the memory allocated for the hashtable

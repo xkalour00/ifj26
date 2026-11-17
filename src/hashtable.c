@@ -263,7 +263,24 @@ int hashtable_find_or_insert(hashtable_t *hashtable, const char *key,
   return HASHTABLE_RETURN_FAILURE;
 }
 
-int hashtable_remove(hashtable_t *hashtable, const char *key) {
+int hashtable_remove(hashtable_t *hashtable, hashtable_item_t *item,
+                     void (*free_func)(void *)) {
+  if (hashtable == NULL || item == NULL) {
+    return HASHTABLE_RETURN_FAILURE;
+  }
+  free(item->key);
+  item->key = NULL;
+  if (free_func != NULL && item->value != NULL) {
+    free_func(item->value);
+  }
+  item->value = NULL;
+  item->state = HASHTABLE_DELETED;
+  hashtable->count--;
+  hashtable->deleted++;
+  return HASHTABLE_RETURN_SUCCESS;
+}
+
+int hashtable_find_and_remove(hashtable_t *hashtable, const char *key) {
   if (hashtable == NULL || key == NULL) {
     return HASHTABLE_RETURN_FAILURE;
   }
@@ -274,16 +291,22 @@ int hashtable_remove(hashtable_t *hashtable, const char *key) {
   bool found = false;
   int idx = hashtable_get_index(hashtable, key, &found);
   if (idx != -1 && found) {
-    free(hashtable->items[idx].key);
-    hashtable->items[idx].key = NULL;
-    hashtable->items[idx].value = NULL;
-    hashtable->items[idx].state = HASHTABLE_DELETED;
-    hashtable->count--;
-    hashtable->deleted++;
+    hashtable_remove(hashtable, &hashtable->items[idx], NULL);
     return HASHTABLE_RETURN_SUCCESS;
   }
 
   return HASHTABLE_RETURN_NOT_FOUND;
+}
+
+void hashtable_clear(hashtable_t *hashtable, void (*free_func)(void *)) {
+  if (hashtable == NULL) {
+    return;
+  }
+  for (int i = 0; i < hashtable->size; i++) {
+    hashtable_remove(hashtable, &hashtable->items[i], free_func);
+  }
+  hashtable->count = 0;
+  hashtable->deleted = 0;
 }
 
 void hashtable_free(hashtable_t *hashtable) {
