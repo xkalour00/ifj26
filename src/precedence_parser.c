@@ -285,7 +285,7 @@ ast_node_t *parse_precedence(char* identifier_consumed){
         stack_push_symbol(stack,SHIFT);
         stack_push_symbol(stack,I);
         if(current_token_type_parser == SP_OPENING_PARENTHESIS){
-           stack_push_node(node_stack, make_func_call_tree(make_node(AST_LEAF, identifier_consumed), parse_precedence_arguments()));
+           stack_push_node(node_stack, make_func_call_tree(identifier_consumed, parse_precedence_arguments()));
        }
     else{
         stack_push_node(node_stack, make_node(AST_LEAF, make_unique_name(identifier_consumed)));
@@ -346,7 +346,7 @@ ast_node_t *parse_precedence(char* identifier_consumed){
 
             consume();
             if(old == IDENTIFIER && current_token_type_parser == SP_OPENING_PARENTHESIS){
-                operand = make_func_call_tree(make_node(AST_LEAF,name), parse_precedence_arguments());
+                operand = make_func_call_tree(name, parse_precedence_arguments());
             }
             else if(old == IDENTIFIER){
                 operand = make_node(AST_LEAF, make_unique_name(name));
