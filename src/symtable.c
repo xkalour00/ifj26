@@ -57,8 +57,10 @@ int symtable_insert(symtable_t *symtable, ast_node_t *node, bool is_function,
     name = node->data.declaration.name;
   }
 
+  hashtable_t *current_scope = *(hashtable_t **)stack_top(symtable->scopes);
   void *found;
-  if (hashtable_find(stack_top(symtable->scopes), name, &found) == 0) {
+  if (current_scope == NULL ||
+      hashtable_find(current_scope, name, &found) == 0) {
     return SYMTABLE_RETURN_FAILURE;
   }
 
@@ -70,7 +72,7 @@ int symtable_insert(symtable_t *symtable, ast_node_t *node, bool is_function,
   symbol->declaration = node;
   symbol->is_const = is_const;
 
-  if (hashtable_insert(stack_top(symtable->scopes), name, symbol) != 0) {
+  if (hashtable_insert(current_scope, name, symbol) != 0) {
     free(symbol);
     return SYMTABLE_RETURN_FAILURE;
   }
@@ -81,7 +83,9 @@ int symtable_insert(symtable_t *symtable, ast_node_t *node, bool is_function,
 symbol_t *symtable_find(const symtable_t *symtable, const char *name) {
   for (int i = 0; i < symtable->scope_level; i++) {
     void *found;
-    if (hashtable_find(stack_get(symtable->scopes, i), name, &found) == 0) {
+    hashtable_t *current_scope =
+        *(hashtable_t **)stack_get(symtable->scopes, i);
+    if (hashtable_find(current_scope, name, &found) == 0) {
       return found;
     }
   }
@@ -97,7 +101,10 @@ int symtable_scope_push(symtable_t *symtable) {
   if (hashtable_init(&new_scope) != 0) {
     return SYMTABLE_RETURN_FAILURE;
   }
-  stack_push(symtable->scopes, new_scope);
+  if (stack_push(symtable->scopes, &new_scope) != 0) {
+    hashtable_free(new_scope);
+    return SYMTABLE_RETURN_FAILURE;
+  }
   symtable->scope_level++;
   return SYMTABLE_RETURN_SUCCESS;
 }
@@ -112,7 +119,7 @@ void symtable_scope_pop(symtable_t *symtable) {
     return;
   }
 
-  hashtable_t *current_scope = stack_top(symtable->scopes);
+  hashtable_t *current_scope = *(hashtable_t **)stack_top(symtable->scopes);
   if (current_scope != NULL) {
     hashtable_clear(current_scope, symtable_free_func);
     hashtable_free(current_scope);
@@ -126,12 +133,15 @@ void symtable_free(symtable_t *symtable) {
     return;
   }
 
-  void *item = stack_top(symtable->scopes);
-  while (item != NULL) {
-    hashtable_clear(item, symtable_free_func);
-    hashtable_free(item);
+  while (!stack_is_empty(symtable->scopes)) {
+    void *top_ptr = stack_top(symtable->scopes);
+
+    if (top_ptr != NULL) {
+      hashtable_t *item = *(hashtable_t **)top_ptr;
+      hashtable_clear(item, symtable_free_func);
+      hashtable_free(item);
+    }
     stack_pop(symtable->scopes);
-    item = stack_top(symtable->scopes);
   }
   stack_free(symtable->scopes);
   symtable->scopes = NULL;

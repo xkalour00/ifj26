@@ -75,7 +75,7 @@ int hashtable_get_index(const hashtable_t *hashtable, const char *key,
 
   int idx = hashtable_hash1((const unsigned char *)key) % hashtable->size;
   int first_deleted_idx = -1;
-  for (int i = 0; i < hashtable->size; i++) {
+  for (size_t i = 0; i < hashtable->size; i++) {
     if (hashtable->items[idx].state == HASHTABLE_OCCUPIED) {
       if (strcmp(hashtable->items[idx].key, key) == 0) {
         *found = true;
@@ -125,7 +125,7 @@ int hashtable_rehash(hashtable_t *hashtable) {
   }
 
   // rehashes items from old hashtable to new hashtable:
-  for (int i = 0; i < hashtable->size; i++) {
+  for (size_t i = 0; i < hashtable->size; i++) {
     if (hashtable->items[i].state == HASHTABLE_OCCUPIED) {
       hashtable_item_t cur_item = hashtable->items[i];
       int h1 = hashtable_hash1((const unsigned char *)cur_item.key) % new_size;
@@ -302,8 +302,10 @@ void hashtable_clear(hashtable_t *hashtable, void (*free_func)(void *)) {
   if (hashtable == NULL) {
     return;
   }
-  for (int i = 0; i < hashtable->size; i++) {
-    hashtable_remove(hashtable, &hashtable->items[i], free_func);
+  for (size_t i = 0; i < hashtable->size; i++) {
+    if (hashtable->items[i].state == HASHTABLE_OCCUPIED) {
+      hashtable_remove(hashtable, &hashtable->items[i], free_func);
+    }
   }
   hashtable->count = 0;
   hashtable->deleted = 0;
@@ -313,7 +315,7 @@ void hashtable_free(hashtable_t *hashtable) {
   if (hashtable == NULL) {
     return;
   }
-  for (int i = 0; i < hashtable->size; i++) {
+  for (size_t i = 0; i < hashtable->size; i++) {
     if (hashtable->items[i].state == HASHTABLE_OCCUPIED) {
       free(hashtable->items[i].key);
     }
