@@ -8,6 +8,7 @@
  */
 
 #include "ast.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,7 +30,8 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
     node->data.leaf = data;
     break;
   case AST_INTEGER:
-    node->data.integer = *(int64_t *)data;
+    node->data.integer.value = *(int64_t *)data;
+    node->data.integer.to_double = false;
     break;
   case AST_DOUBLE:
     node->data.fp = *(double *)data;
@@ -286,5 +288,8 @@ void free_tree(ast_node_t *root) {
 
 int check_type_validity(ast_node_t *root) {
   // TODO
+  // NOTE: in multiline function, no return type is specified at the end of the
+  // llist, AST should get the last item and make it into a AST_RETURN type
+
   return -1;
 }

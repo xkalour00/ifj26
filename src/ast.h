@@ -69,10 +69,13 @@ typedef struct node {
   ast_node_type_t type;
 
   union {
-    int64_t integer;
     double fp;
     char *leaf; // Under what name we should search symtable
     char *str;
+    struct {
+      int64_t value;
+      bool to_double;
+    } integer;
     struct {
       ast_binary_type_t binary_type;
       struct node *left;
