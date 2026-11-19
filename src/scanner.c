@@ -180,10 +180,10 @@ int get_next_token(token_t **token) {
       if (c == ' ' || c == '\t')
         state = 0; // eating whitespaces
       else if (c == '\n') {
+        count_spaces = true;
+        tmp_spaces = 0;
+        has_tab = false;
         if (parentheses == 0) {
-          count_spaces = true;
-          tmp_spaces = 0;
-          has_tab = false;
           if (!was_last_token_eol) {
             was_last_token_eol = true;
             token_init(token, SP_EOL);
@@ -194,6 +194,8 @@ int get_next_token(token_t **token) {
             has_tab = false;
             state = 36;
           }
+        } else if (parentheses > 0) {
+          state = 36;
         } else
           state = 0;
       } else if (c == EOF) {
@@ -595,6 +597,18 @@ int get_next_token(token_t **token) {
         ungetc(c, stdin);
         count_spaces = false;
 
+        if (has_tab)
+          return SCANNER_RETURN_FAILURE;
+
+        if (parentheses > 0) {
+          if (tmp_spaces <= *(int *)stack_top(indent_stack)) {
+            return SCANNER_RETURN_FAILURE;
+          } else {
+            token_init(token, OP_DIVIDE);
+            return SCANNER_RETURN_SUCCESS;
+          }
+        }
+
         if (tmp_spaces == *(int *)stack_top(indent_stack)) {
           token_init(token, OP_DIVIDE);
           return SCANNER_RETURN_SUCCESS;
@@ -616,21 +630,21 @@ int get_next_token(token_t **token) {
       break;
     case 31: // -- COMMENT (single-line)
       if (c == '\n') {
-        if (parentheses > 0) {
-          state = 0;
-          break;
-        }
         count_spaces = true;
         tmp_spaces = 0;
         has_tab = false;
-        if (!was_last_token_eol) {
-          was_last_token_eol = true;
-          token_init(token, SP_EOL);
-          return SCANNER_RETURN_SUCCESS;
+        if (parentheses == 0) {
+          if (!was_last_token_eol) {
+            was_last_token_eol = true;
+            token_init(token, SP_EOL);
+            return SCANNER_RETURN_SUCCESS;
+          } else {
+            count_spaces = true;
+            tmp_spaces = 0;
+            has_tab = false;
+            state = 36;
+          }
         } else {
-          count_spaces = true;
-          tmp_spaces = 0;
-          has_tab = false;
           state = 36;
         }
       } else if (c == EOF)
@@ -669,9 +683,19 @@ int get_next_token(token_t **token) {
       else if (c == '/') {
         star_count--;
         if (star_count == 0) {
-          if (parentheses > 0)
-            state = 0;
-          else if (has_nl)
+          if (parentheses > 0) {
+            if (has_nl) {
+              count_spaces = true;
+              tmp_spaces = 0;
+              has_tab = false;
+              state = 36;
+            } else {
+              if (count_spaces)
+                state = 36;
+              else
+                state = 0;
+            }
+          } else if (has_nl)
             state = 35;
           else if (count_spaces)
             state = 36;
@@ -719,7 +743,9 @@ int get_next_token(token_t **token) {
         count_spaces = true;
         tmp_spaces = 0;
         has_tab = false;
-        if (!was_last_token_eol) {
+        if (parentheses > 0) {
+          state = 36;
+        } else if (!was_last_token_eol) {
           was_last_token_eol = true;
           token_init(token, SP_EOL);
           return SCANNER_RETURN_SUCCESS;
@@ -733,10 +759,14 @@ int get_next_token(token_t **token) {
       else if (!has_tab) {
         ungetc(c, stdin);
         count_spaces = false;
-        if (tmp_spaces == *(int *)stack_top(indent_stack))
+        if (parentheses > 0) {
+          if (tmp_spaces <= *(int *)stack_top(indent_stack)) {
+            return SCANNER_RETURN_FAILURE;
+          }
           state = 0;
-
-        else {
+        } else if (tmp_spaces == *(int *)stack_top(indent_stack)) {
+          state = 0;
+        } else {
           token_type_t type;
           int to_return = handle_indents(tmp_spaces, &type);
           if (to_return == SCANNER_RETURN_SUCCESS)
