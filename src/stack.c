@@ -76,7 +76,7 @@ void *stack_top(const stack_t *stack) {
 }
 
 void *stack_get(const stack_t *stack, size_t index) {
-  if (stack == NULL || index < 0) {
+  if (stack == NULL) {
     return NULL;
   }
   stack_element_t *current = stack->top;
