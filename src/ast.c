@@ -179,6 +179,20 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
     return -1;
   }
 
+  ast_node_t *body_end = body->data.llist.end;
+  ast_node_t *last_line = body_end->data.llist_item.node;
+
+  // If last line was not set to AST_RETURN, set it that way
+  if (last_line->type != AST_RETURN) {
+    ast_node_t *ret = make_node(AST_RETURN, last_line);
+    if (!ret) {
+      free(node);
+      return -1;
+    }
+
+    body_end->data.llist_item.node = ret;
+  }
+
   node->type = AST_FUNC_DEF;
   node->data.func_def.return_type = return_type;
   node->data.func_def.name = func_name;
@@ -288,8 +302,6 @@ void free_tree(ast_node_t *root) {
 
 int check_type_validity(ast_node_t *root) {
   // TODO
-  // NOTE: in multiline function, no return type is specified at the end of the
-  // llist, AST should get the last item and make it into a AST_RETURN type
 
   return -1;
 }

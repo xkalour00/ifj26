@@ -139,6 +139,30 @@ void test_free_main_other_root(ast_node_t *root) {
     free_tree(root);
   }
 
+  int64_t x = 44;
+  ast_node_t *ret_data = make_node(AST_INTEGER, &x);
+
+  if (!ret_data) {
+    fprintf(stderr, "Integer allocation error");
+    free_tree(param);
+    free_tree(body);
+    free_tree(root);
+    exit(1);
+  }
+
+  ast_node_t *ret = make_node(AST_RETURN, ret_data);
+
+  if (!ret_data) {
+    fprintf(stderr, "Return node allocation error");
+    free_tree(param);
+    free_tree(body);
+    free_tree(ret_data);
+    free_tree(root);
+    exit(1);
+  }
+
+  add_llist_item(body, ret);
+
   add_func_def_tree(root, RETURN_UNIT, func_name1, param, body, false);
 
   char *func_name2 = malloc(sizeof(char) * 20);
