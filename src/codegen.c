@@ -2,8 +2,8 @@
  * @file codegen.c
  *
  * @author Dávid Čech-Gut
- * @brief FIT VUT | IFJ project 2026 - code generation implementation
- * @date 2026-11-18
+ * @brief
+ * @date 2026-11-02
  */
 
 #include "codegen.h"
@@ -17,13 +17,19 @@ static int varCount = 0;
 static FILE *dst;
 static int labelCounter;
 
-static void generateNode(const ast_node_t *node);
+static int generateNode(const ast_node_t *node);
 static void addVar(char *name);
 static void generateFunctionVars(const ast_node_t *node);
 static void pushParametersReversed(const ast_node_t *node);
 static void outputString(const char *str);
 
-void generateCode(const ast_node_t *root, FILE *out){
+/**
+ * @brief 
+ * @param root Root node of AST
+ * @param out Pointer to file destination
+ * @return Error code
+ */
+int generateCode(const ast_node_t *root, FILE *out){
     dst = out;
     output(".IFJcode26");
     output("");
@@ -48,7 +54,6 @@ void generateCode(const ast_node_t *root, FILE *out){
     generateOrdDef();
     generateChrDef();
 
-    generateNode(root->data.root.main_func);
     for(ast_node_t *item = root->data.root.func_def_list->data.llist.begin; 
         item != NULL; item = item->data.llist_item.next)
         {
@@ -60,20 +65,21 @@ void generateCode(const ast_node_t *root, FILE *out){
 /**
  * @brief Processes a node from the AST
  * @param node Pointer to node, waiting to be processed
+ * @return Returns error code
  */
-static void generateNode(const ast_node_t *node){
+static int generateNode(const ast_node_t *node){
 
     if(!node) return 0;
 
     switch(node->type) {
         // implicit conversion of integer node
         case AST_INTEGER: 
-            // if(node->data.integer.to_double){
-            //     output("INT2FLOAT GF@tmp int@%d", node->data.integer.value);
-            //     output("PUSHS GF@tmp");
-            //     break;
-            // }
-            output("PUSHS int@%d", node->data.integer); 
+            if(node->data.integer.to_double){
+                output("INT2FLOAT GF@tmp int@%d", node->data.integer.value);
+                output("PUSHS GF@tmp");
+                break;
+            }
+            output("PUSHS int@%d", node->data.integer.value); 
             break;
         case AST_DOUBLE: 
             output("PUSHS float@%a", node->data.fp); 
@@ -128,6 +134,11 @@ static void generateNode(const ast_node_t *node){
                 case AST_EQUAL:
                     output("EQS");
                     break;
+                
+                case AST_NEQUAL:
+                    output("EQS");
+                    output("NOTS");
+                    break;
 
                 case AST_LEQUAL: 
                     output("GTS");
@@ -172,15 +183,13 @@ static void generateNode(const ast_node_t *node){
                 for(ast_node_t *item = node->data.func_def.parameters->data.llist.begin;
                     item != NULL; item = item->data.llist_item.next)
                     {
-                        // output("DEFVAR LF@%s", item->data.llist_item.node->data.declaration.name);
                         addVar(item->data.llist_item.node->data.declaration.name);
                         output("POPS LF@%s", item->data.llist_item.node->data.declaration.name);
                 }
             }
             generateFunctionVars(node->data.func_def.tree_list);
             generateNode(node->data.func_def.tree_list);
-            output("POPFRAME");
-            output("RETURN");
+            output("");
             break;
 
         // pushes the last parameter first, so that first parameter is on top of the stack
@@ -217,13 +226,13 @@ static void generateNode(const ast_node_t *node){
             output("LABEL else%d", id);
             generateNode(node->data.if_statement.else_block);
             output("LABEL end_if%d", id);
-            output("");
+
             break;
         }
 
         case AST_RETURN: 
             if(node->data.return_node.value == NULL){
-                output("PUSHS nil@nil");
+                // output("PUSHS nil@nil");
                 output("POPFRAME");
                 output("RETURN");
                 break;
@@ -317,6 +326,18 @@ static void pushParametersReversed(const ast_node_t *node){
 }
 
 /**
+ * @brief Handles easier output to out.ifjcode
+ * @param fmt Formatting string
+ */
+void output(const char *fmt, ...){
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(dst, fmt, args);
+    fprintf(dst, "\n");
+    va_end(args);
+}
+
+/**
  * @brief Correctly outputs escape sequences in IFJcode26
  * @param str string from AST
  */
@@ -332,11 +353,3 @@ static void outputString(const char *str){
     }
     fprintf(dst, "\n");
 }   
-
-void output(const char *fmt, ...){
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(dst, fmt, args);
-    fprintf(dst, "\n");
-    va_end(args);
-}
