@@ -9,8 +9,8 @@ TARGET       = ifj26-compiler
 LOGIN        = xkalour00
 
 SRC_DIR      = src
-SRC_FILES    = $(wildcard $(SRC_DIR/*.c))
-HEADER_FILES = $(wildcard $(SRC_DIR/*.h))
+SRC_FILES    = $(wildcard $(SRC_DIR)/*.c)
+HEADER_FILES = $(wildcard $(SRC_DIR)/*.h)
 OBJS         = $(SRC_FILES:.c=.o)
 
 .PHONY: all clean check pack
