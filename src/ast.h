@@ -4,12 +4,13 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Abstract Syntax Tree interface header
  *
- * @date 2026-11-17
+ * @date 2026-11-21
  */
 
 #ifndef AST_H
 #define AST_H
 
+#include "stack.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -100,6 +101,12 @@ typedef struct node {
     } if_statement;
     struct {
       return_type_t return_type;
+      // Pre-typecheck variable, if true, return_type must NOT be RETURN_UNKNOWN
+      bool possible_recursion;
+      // Pre-typecheck variable, if true, return_type must NOT be RETURN_UNKNOWN
+      bool has_return_node;
+      // Pre-typecheck variable, directly reachable functions from this function
+      stack_t *dir_reach_funcs;
       struct node *parameters;
       struct node *tree_list;
       char *name;
@@ -237,11 +244,12 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
 void free_tree(ast_node_t *root);
 
 /**
- * @brief Test AST for type irregularities
+ * @brief Perform type checking on whole AST
  *
- * @param root AST root node
- * @return int Return code; 0 if tree is correct, non-zero otherwise
+ * @param root Root node of the AST
+ * @param symtable Pointer to symbol table
+ * @return int Return code; 0 on success, non-zero on failure
  */
-int check_type_validity(ast_node_t *root);
+int check_type_validity(ast_node_t *root, void *symtable);
 
 #endif // #ifndef AST_H

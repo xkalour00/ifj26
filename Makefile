@@ -7,14 +7,15 @@
 #
 #####
 
+ARCHIVE_NAME = xkalour00
+
 CC = gcc
 CFLAGS = -std=c11 -pedantic -Wall -Wextra -fsanitize=address
 LDFLAGS += -fsanitize=address
 
-BUILD_PATH = build/
+BUILD_PATH = build
 
-# AST sources
-AST_SRC = src/ast.h src/ast.c
+SOURCES = src
 # AST test sources
 AST_TEST_SRC = test/ast_test_nodes.c
 
@@ -23,17 +24,17 @@ default_target: all
 
 test_ast:
 	@mkdir -p $(BUILD_PATH)
-	$(CC) $(CFLAGS) -g $(AST_SRC) $(AST_TEST_SRC) -o $(BUILD_PATH)$@
+	$(CC) $(CFLAGS) -g $(SOURCES)/* $(AST_TEST_SRC) -o $(BUILD_PATH)/$@
 
 	@# execute built program
 	@echo; echo "##### Plain output #####"; echo
-	./$(BUILD_PATH)$@
+	./$(BUILD_PATH)/$@
 	@echo; echo "##### Valgrind output #####"; echo
-	valgrind -s --leak-check=full ./$(BUILD_PATH)$@
+	valgrind -s --leak-check=full ./$(BUILD_PATH)/$@
 all:
 	@mkdir -p $(BUILD_PATH)
 	@echo "TODO make all"
 pack:
 	@echo "TODO make pack"
 clean:
-	@echo "TODO make clean"
+	rm -rf $(BUILD_PATH)*

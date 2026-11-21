@@ -4,10 +4,12 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Implementation of an abstract syntax tree
  *
- * @date 2026-11-17
+ * @date 2026-11-21
  */
 
 #include "ast.h"
+#include "ast_tc.h"
+#include "stack.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -48,7 +50,7 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
   }
 
   return node;
-}
+} // ast_node_t *make_node(ast_node_type_t type, void *data)
 
 ast_node_t *make_root_node() {
   ast_node_t *node = malloc(sizeof(ast_node_t));
@@ -195,15 +197,28 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
 
   node->type = AST_FUNC_DEF;
   node->data.func_def.return_type = return_type;
+  node->data.func_def.possible_recursion = false;
+  node->data.func_def.has_return_node = false;
+  bool *ret_node_flag = &(node->data.func_def.has_return_node);
+  stack_t **dr_funcs = &(node->data.func_def.dir_reach_funcs);
   node->data.func_def.name = func_name;
   node->data.func_def.parameters = params;
   node->data.func_def.tree_list = body;
+
+  // Initialize stack that holds dynamically allocated strings
+  if (stack_init(dr_funcs, sizeof(char *))) {
+    free(node);
+    return -1;
+  }
+
+  // And fill the stack with function names that are called in its body
+  search_for_dr_funcs_return(*dr_funcs, ret_node_flag, body);
 
   ast_node_t *llist = root_node->data.root.func_def_list;
   int append_result = add_llist_item(llist, node);
 
   if (append_result) {
-    free(node);
+    free_tree(node);
     return -1;
   }
 
@@ -212,7 +227,9 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   }
 
   return 0;
-}
+} // int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
+  //                  char *func_name, ast_node_t *params, ast_node_t *body,
+  //                  bool is_main)
 
 ast_node_t *make_declaration_node(char *name, return_type_t return_type,
                                   ast_node_t *value) {
@@ -275,6 +292,7 @@ void free_tree(ast_node_t *root) {
     break;
   case AST_FUNC_DEF:
     free(root->data.func_def.name);
+    stack_free(root->data.func_def.dir_reach_funcs);
     free_tree(root->data.func_def.tree_list);
     free_tree(root->data.func_def.parameters);
     break;
@@ -299,9 +317,3 @@ void free_tree(ast_node_t *root) {
   // After every child is freed, free itself
   free(root);
 } // void free_tree(ast_node_t *root)
-
-int check_type_validity(ast_node_t *root) {
-  // TODO
-
-  return -1;
-}
