@@ -188,6 +188,27 @@ int token_get_nl_before(const token_t *token, bool *nl_before_val);
 int token_set_nl_before(token_t *token, bool nl_before_val);
 
 /**
+ * @brief Gets the line number of a token
+ *
+ * @param[in] token pointer to the token whose line number is to be retrieved
+ * @param[out] line_number pointer to the location where the line number will be
+ * stored
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_get_line_number(const token_t *token, int *line_number);
+
+/**
+ * @brief Sets the line number of a token
+ *
+ * @param[in,out] token pointer to the token whose line number is to be set
+ * @param[in] line_number new line number
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_set_line_number(token_t *token, int line_number);
+
+/**
  * @brief Frees a token
  *
  * @param[in] token pointer to token that is to be freed

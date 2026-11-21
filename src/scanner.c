@@ -16,7 +16,8 @@
 #include <string.h>
 
 #define SCANNER_RETURN_SUCCESS 0
-#define SCANNER_RETURN_FAILURE -1
+#define SCANNER_RETURN_LEXICAL_ERROR 1
+#define SCANNER_RETURN_INTERNAL_ERROR 99
 
 #define INITIAL_BUFFER_SIZE 256
 #define INDENT_BASE 0
@@ -84,6 +85,7 @@ typedef struct {
   buffer_t *buffer;        // buffer for filling token values (strings, etc.)
   bool was_last_token_eol; // preventing multiple EOL tokens in a row
   bool nl_seen;            // flag to indicate if newline was seen
+  int line_number;         // current line number
 } scanner_variables_t;
 
 static scanner_variables_t *scanner_vars = NULL;
@@ -93,7 +95,7 @@ static scanner_variables_t *scanner_vars = NULL;
  * @param buffer The buffer to add the character to
  * @param c The character to add
  * @return SCANNER_RETURN_SUCCESS if the character was added,
- * SCANNER_RETURN_FAILURE otherwise
+ * SCANNER_RETURN_INTERNAL_ERROR otherwise
  */
 static int buffer_add_char(buffer_t *buffer, char c) {
   if (buffer->index >=
@@ -101,7 +103,7 @@ static int buffer_add_char(buffer_t *buffer, char c) {
     size_t new_size = buffer->size * 2;
     char *new_buffer = realloc(buffer->buffer, new_size);
     if (new_buffer == NULL) {
-      return SCANNER_RETURN_FAILURE;
+      return SCANNER_RETURN_INTERNAL_ERROR;
     }
     buffer->buffer = new_buffer;
     buffer->size = new_size;
@@ -182,11 +184,14 @@ static bool is_keyword(const char *str, token_type_t *type) {
  * @param tmp_spaces The number of spaces in the current line
  * @param type Pointer to the token type to be set
  * @return SCANNER_RETURN_SUCCESS if the indentation is correct,
- * SCANNER_RETURN_FAILURE otherwise
+ * SCANNER_RETURN_LEXICAL_ERROR if the indentation is incorrect and
+ * SCANNER_RETURN_INTERNAL_ERROR if there was an internal error
  */
 static int handle_indents(int tmp_spaces, token_type_t *type) {
   if (tmp_spaces > get_indentation()) {
-    stack_push(scanner_vars->indent_stack, &tmp_spaces);
+    if (stack_push(scanner_vars->indent_stack, &tmp_spaces) != 0) {
+      return SCANNER_RETURN_INTERNAL_ERROR;
+    }
     *type = SP_INDENT;
     return SCANNER_RETURN_SUCCESS;
   } else if (tmp_spaces < get_indentation()) {
@@ -201,7 +206,7 @@ static int handle_indents(int tmp_spaces, token_type_t *type) {
     }
   }
 
-  return SCANNER_RETURN_FAILURE;
+  return SCANNER_RETURN_LEXICAL_ERROR;
 }
 
 static int return_token(token_t **token, token_type_t type) {
@@ -219,14 +224,29 @@ static int return_token(token_t **token, token_type_t type) {
 
   if (token_init(token, type) == 0) {
     if (type == INTEGER) {
-      token_set_int(*token, strtoll(scanner_vars->buffer->buffer, NULL, 10));
+      if (token_set_int(*token,
+                        strtoll(scanner_vars->buffer->buffer, NULL, 10)) != 0) {
+        return SCANNER_RETURN_INTERNAL_ERROR;
+      }
       buffer_reset(scanner_vars->buffer);
     } else if (type == DOUBLE) {
-      token_set_double(*token, strtod(scanner_vars->buffer->buffer, NULL));
+      if (token_set_double(*token,
+                           strtod(scanner_vars->buffer->buffer, NULL)) != 0) {
+        token_free(*token);
+        return SCANNER_RETURN_INTERNAL_ERROR;
+      }
       buffer_reset(scanner_vars->buffer);
     } else if (type == IDENTIFIER || type == STRING) {
-      token_set_string(*token, scanner_vars->buffer->buffer);
+      if (token_set_string(*token, scanner_vars->buffer->buffer) != 0) {
+        token_free(*token);
+        return SCANNER_RETURN_INTERNAL_ERROR;
+      }
       buffer_reset(scanner_vars->buffer);
+    }
+
+    if (token_set_line_number(*token, scanner_vars->line_number) != 0) {
+      token_free(*token);
+      return SCANNER_RETURN_INTERNAL_ERROR;
     }
 
     if (token_set_nl_before(*token, scanner_vars->nl_seen) == 0) {
@@ -235,7 +255,7 @@ static int return_token(token_t **token, token_type_t type) {
     }
   }
 
-  return SCANNER_RETURN_FAILURE;
+  return SCANNER_RETURN_INTERNAL_ERROR;
 }
 
 static void newline_started(int *tmp_spaces, bool *has_tab) {
@@ -272,6 +292,7 @@ int get_next_token(token_t **token) {
       if (c == ' ' || c == '\t')
         state = S_START; // eating whitespaces
       else if (c == '\n') {
+        scanner_vars->line_number++;
         newline_started(&tmp_spaces, &has_tab);
         if (scanner_vars->parentheses == 0) {
           if (!scanner_vars->was_last_token_eol) {
@@ -337,7 +358,7 @@ int get_next_token(token_t **token) {
         } else if (c == '.') {
           state = S_DOT_OR_DOUBLE_START;
         } else {
-          return SCANNER_RETURN_FAILURE;
+          return SCANNER_RETURN_LEXICAL_ERROR;
         }
       }
       break;
@@ -355,14 +376,14 @@ int get_next_token(token_t **token) {
         scanner_vars->pending_dedents--;
         return return_token(token, SP_DEDENT);
       } else {
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       }
       break;
     case S_NOT_EQUAL:
       if (c == '=') {
         return return_token(token, OP_NOT_EQUAL);
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_GREATER_OR_EQUAL:
       if (c == '=') {
@@ -392,25 +413,25 @@ int get_next_token(token_t **token) {
       if (c == 'm')
         state = S_AT_MAIN_MA;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_AT_MAIN_MA:
       if (c == 'a')
         state = S_AT_MAIN_MAI;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_AT_MAIN_MAI:
       if (c == 'i')
         state = S_AT_MAIN_MAIN;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_AT_MAIN_MAIN:
       if (c == 'n') {
         return return_token(token, SP_MAIN);
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_UNDERSCORE:
       if (isalpha(c) || isdigit(c) || c == '_') {
@@ -440,7 +461,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_STRING_CONTENT:
       if (c == '\\')
@@ -451,7 +472,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_STRING_ESCAPE:
       if (c == '\\') {
@@ -465,7 +486,7 @@ int get_next_token(token_t **token) {
       } else if (c == 't') {
         buffer_add_char(scanner_vars->buffer, '\t');
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       state = S_STRING_CONTENT;
       break;
     case S_STRING_END:
@@ -483,7 +504,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_STRING_END1:
       if (c == '\"') {
@@ -493,7 +514,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, '\"');
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_STRING_END2:
       if (c == '\"') {
@@ -504,7 +525,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, '\"');
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_STRING_END3:
       if (c == '\"') {
@@ -545,7 +566,7 @@ int get_next_token(token_t **token) {
       } else if (c == '_') {
         state = S_INT_ZEROS_UNDERSCORE;
       } else {
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       }
       break;
     case S_INT_ZEROS_UNDERSCORE:
@@ -553,7 +574,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_INT_LEADING_ZEROS;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOUBLE_EXP_START:
       if (c == '+' || c == '-') {
@@ -563,14 +584,14 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOUBLE_EXP_SIGN:
       if (isdigit(c)) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOUBLE_EXP_CONTENT:
       if (isdigit(c)) {
@@ -589,7 +610,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_INT_CONTENT:
       if (isdigit(c)) {
@@ -613,14 +634,14 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_INT_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOUBLE_DEC_START:
       if (isdigit(c)) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_DOUBLE_DEC_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOUBLE_DEC_CONTENT:
       if (isdigit(c)) {
@@ -643,7 +664,7 @@ int get_next_token(token_t **token) {
         buffer_add_char(scanner_vars->buffer, c);
         state = S_DOUBLE_DEC_CONTENT;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_DOT_OR_DOUBLE_START:
       if (isdigit(c)) {
@@ -668,11 +689,11 @@ int get_next_token(token_t **token) {
         scanner_vars->count_spaces = false;
 
         if (has_tab)
-          return SCANNER_RETURN_FAILURE;
+          return SCANNER_RETURN_LEXICAL_ERROR;
 
         if (scanner_vars->parentheses > 0) {
           if (tmp_spaces <= get_indentation()) {
-            return SCANNER_RETURN_FAILURE;
+            return SCANNER_RETURN_LEXICAL_ERROR;
           } else {
             return return_token(token, OP_DIVIDE);
           }
@@ -693,12 +714,13 @@ int get_next_token(token_t **token) {
         ungetc(c, stdin);
         return return_token(token, OP_DIVIDE);
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_LINE_CMNT:
       if (c == '\n') {
         if (scanner_vars->parentheses > 0)
           scanner_vars->nl_seen = true;
+        scanner_vars->line_number++;
         newline_started(&tmp_spaces, &has_tab);
         if (scanner_vars->parentheses == 0) {
           if (!scanner_vars->was_last_token_eol) {
@@ -725,7 +747,7 @@ int get_next_token(token_t **token) {
       } else if (c != EOF)
         state = S_MULTILINE_CMNT_START;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_CMNT_NEST:
       if (c == '*') {
@@ -737,7 +759,7 @@ int get_next_token(token_t **token) {
       } else if (c != EOF) {
         state = S_MULTILINE_CMNT_START;
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_CMNT_END:
       if (c == '*')
@@ -748,6 +770,7 @@ int get_next_token(token_t **token) {
           if (scanner_vars->parentheses > 0) {
             if (has_nl) {
               scanner_vars->nl_seen = true;
+              scanner_vars->line_number++;
               newline_started(&tmp_spaces, &has_tab);
               state = S_INDENT;
             } else {
@@ -767,12 +790,13 @@ int get_next_token(token_t **token) {
       } else if (c != EOF)
         state = S_MULTILINE_CMNT_START;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_MULTILINE_CMNT_EOL:
       if (c == ' ')
         state = S_MULTILINE_CMNT_EOL;
       else if (c == '\n') {
+        scanner_vars->line_number++;
         newline_started(&tmp_spaces, &has_tab);
         if (!scanner_vars->was_last_token_eol) {
           return return_token(token, SP_EOL);
@@ -782,7 +806,7 @@ int get_next_token(token_t **token) {
       } else if (c == EOF)
         state = S_EOF;
       else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     case S_INDENT:
       if (c == '/')
@@ -794,6 +818,7 @@ int get_next_token(token_t **token) {
         has_tab = true;
         state = S_INDENT;
       } else if (c == '\n') {
+        scanner_vars->line_number++;
         if (scanner_vars->parentheses > 0)
           scanner_vars->nl_seen = true;
         newline_started(&tmp_spaces, &has_tab);
@@ -811,7 +836,7 @@ int get_next_token(token_t **token) {
         scanner_vars->count_spaces = false;
         if (scanner_vars->parentheses > 0) {
           if (tmp_spaces <= get_indentation()) {
-            return SCANNER_RETURN_FAILURE;
+            return SCANNER_RETURN_LEXICAL_ERROR;
           }
           state = S_START;
         } else if (tmp_spaces == get_indentation()) {
@@ -824,7 +849,7 @@ int get_next_token(token_t **token) {
           return to_return;
         }
       } else
-        return SCANNER_RETURN_FAILURE;
+        return SCANNER_RETURN_LEXICAL_ERROR;
       break;
     }
   }
@@ -833,7 +858,7 @@ int get_next_token(token_t **token) {
 int scanner_init() {
   scanner_vars = malloc(sizeof(scanner_variables_t));
   if (scanner_vars == NULL) {
-    return SCANNER_RETURN_FAILURE;
+    return SCANNER_RETURN_INTERNAL_ERROR;
   }
   scanner_vars->parentheses = 0;
   scanner_vars->pending_dedents = 0;
@@ -841,24 +866,25 @@ int scanner_init() {
   scanner_vars->count_spaces = true;
   scanner_vars->was_last_token_eol = true;
   scanner_vars->nl_seen = false;
+  scanner_vars->line_number = 1;
 
   if (stack_init(&scanner_vars->indent_stack, sizeof(int)) != 0) {
     free(scanner_vars);
-    return SCANNER_RETURN_FAILURE;
+    return SCANNER_RETURN_INTERNAL_ERROR;
   }
 
   int indent_base = INDENT_BASE;
   if (stack_push(scanner_vars->indent_stack, &indent_base) != 0) {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars);
-    return SCANNER_RETURN_FAILURE;
+    return SCANNER_RETURN_INTERNAL_ERROR;
   }
 
   scanner_vars->buffer = malloc(sizeof(buffer_t));
   if (scanner_vars->buffer == NULL) {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars);
-    return SCANNER_RETURN_FAILURE;
+    return SCANNER_RETURN_INTERNAL_ERROR;
   }
 
   scanner_vars->buffer->buffer = malloc(INITIAL_BUFFER_SIZE);
@@ -866,7 +892,7 @@ int scanner_init() {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars->buffer);
     free(scanner_vars);
-    return SCANNER_RETURN_FAILURE;
+    return SCANNER_RETURN_INTERNAL_ERROR;
   }
   scanner_vars->buffer->size = INITIAL_BUFFER_SIZE;
   scanner_vars->buffer->index = 0;
