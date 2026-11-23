@@ -17,11 +17,11 @@ static int varCount = 0;
 static FILE *dst;
 static int labelCounter;
 
-static int generateNode(const ast_node_t *node);
-static void addVar(char *name);
-static void generateFunctionVars(const ast_node_t *node);
-static void pushParametersReversed(const ast_node_t *node);
-static void outputString(const char *str);
+static int generate_node(const ast_node_t *node);
+static void add_var(char *name);
+static void generate_function_vars(const ast_node_t *node);
+static void push_parameters_reversed(const ast_node_t *node);
+static void output_string(const char *str);
 
 /**
  * @brief 
@@ -29,7 +29,7 @@ static void outputString(const char *str);
  * @param out Pointer to file destination
  * @return Error code
  */
-int generateCode(const ast_node_t *root, FILE *out){
+int generate_code(const ast_node_t *root, FILE *out){
     dst = out;
     output(".IFJcode26");
     output("");
@@ -43,21 +43,21 @@ int generateCode(const ast_node_t *root, FILE *out){
     output("EXIT GF@exit_code");
     output("");
 
-    generatePrintDef();
-    generateReadLineDef();
-    generateReadIntDef();
-    generateReadDoubleDef();
-    generateToStrDef();
-    generateToIntDef();
-    generateStrLengthDef();
-    generateSubStrDef();
-    generateOrdDef();
-    generateChrDef();
+    generate_print_def();
+    generate_read_line_def();
+    generate_read_int_def();
+    generate_read_double_def();
+    generate_to_str_def();
+    generate_to_int_def();
+    generate_str_length_def();
+    generate_sub_str_def();
+    generate_ord_def();
+    generate_chr_def();
 
     for(ast_node_t *item = root->data.root.func_def_list->data.llist.begin; 
         item != NULL; item = item->data.llist_item.next)
         {
-            generateNode(item->data.llist_item.node);
+            generate_node(item->data.llist_item.node);
         }
     return 0;
 }
@@ -67,7 +67,7 @@ int generateCode(const ast_node_t *root, FILE *out){
  * @param node Pointer to node, waiting to be processed
  * @return Returns error code
  */
-static int generateNode(const ast_node_t *node){
+static int generate_node(const ast_node_t *node){
 
     if(!node) return 0;
 
@@ -88,18 +88,18 @@ static int generateNode(const ast_node_t *node){
             output("PUSHS LF@%s", node->data.leaf);
             break;
         case AST_STRING:
-            outputString(node->data.str);
+            output_string(node->data.str);
             break;
         // assignment is special from the rest, does not need to generate left node
         case AST_BINARY: 
             if (node->data.binary.binary_type == AST_ASSIGNMENT) {
-                generateNode(node->data.binary.right);
+                generate_node(node->data.binary.right);
                 output("POPS LF@%s", node->data.binary.left->data.leaf);
                 break;
             }
             // preorder traversal
-            generateNode(node->data.binary.left);
-            generateNode(node->data.binary.right);
+            generate_node(node->data.binary.left);
+            generate_node(node->data.binary.right);
 
             switch(node->data.binary.binary_type){
                 case AST_ADDITION:  {
@@ -166,7 +166,7 @@ static int generateNode(const ast_node_t *node){
             for(ast_node_t *item = node->data.llist.begin; 
                 item != NULL; item = item->data.llist_item.next)
                 {
-                    generateNode(item->data.llist_item.node);
+                    generate_node(item->data.llist_item.node);
                 }
             break;
 
@@ -183,19 +183,19 @@ static int generateNode(const ast_node_t *node){
                 for(ast_node_t *item = node->data.func_def.parameters->data.llist.begin;
                     item != NULL; item = item->data.llist_item.next)
                     {
-                        addVar(item->data.llist_item.node->data.declaration.name);
+                        add_var(item->data.llist_item.node->data.declaration.name);
                         output("POPS LF@%s", item->data.llist_item.node->data.declaration.name);
                 }
             }
-            generateFunctionVars(node->data.func_def.tree_list);
-            generateNode(node->data.func_def.tree_list);
+            generate_function_vars(node->data.func_def.tree_list);
+            generate_node(node->data.func_def.tree_list);
             output("");
             break;
 
         // pushes the last parameter first, so that first parameter is on top of the stack
         case AST_FUNC_CALL:
             if(node->data.func_call.parameters){
-                pushParametersReversed(node->data.func_call.parameters->data.llist.begin);
+                push_parameters_reversed(node->data.func_call.parameters->data.llist.begin);
             }
             output("CALL func_%s", node->data.func_call.name);
             break;
@@ -204,11 +204,11 @@ static int generateNode(const ast_node_t *node){
             int id = labelCounter++;
             
             output("LABEL while%d", id);
-            generateNode(node->data.while_statement.condition);
+            generate_node(node->data.while_statement.condition);
             output("PUSHS bool@false");
             output("JUMPIFEQS end_while%d", id);
 
-            generateNode(node->data.while_statement.while_block);
+            generate_node(node->data.while_statement.while_block);
             output("JUMP while%d", id);
             output("LABEL end_while%d", id);
             break;
@@ -217,14 +217,14 @@ static int generateNode(const ast_node_t *node){
         case AST_IF_STATEMENT: {
             int id = labelCounter++;
 
-            generateNode(node->data.if_statement.condition);
+            generate_node(node->data.if_statement.condition);
             output("PUSHS bool@false");
             output("JUMPIFEQS else%d", id);
-            generateNode(node->data.if_statement.if_block);
+            generate_node(node->data.if_statement.if_block);
             output("JUMP end_if%d", id);
 
             output("LABEL else%d", id);
-            generateNode(node->data.if_statement.else_block);
+            generate_node(node->data.if_statement.else_block);
             output("LABEL end_if%d", id);
 
             break;
@@ -237,14 +237,14 @@ static int generateNode(const ast_node_t *node){
                 output("RETURN");
                 break;
             }
-            generateNode(node->data.return_node.value);
+            generate_node(node->data.return_node.value);
             output("POPFRAME");
             output("RETURN");
             break;
 
         case AST_DECLARATION:
             if (node->data.declaration.value != NULL){
-                generateNode(node->data.declaration.value);
+                generate_node(node->data.declaration.value);
                 output("POPS LF@%s", node->data.declaration.name);
             }
         default: break;
@@ -257,44 +257,44 @@ static int generateNode(const ast_node_t *node){
  * @brief Collects all variables found in a function
  * @param node Pointer to beginning of function code block
  */
-static void generateFunctionVars(const ast_node_t *node){
+static void generate_function_vars(const ast_node_t *node){
     
     if(!node) return;
 
     switch(node->type) {
         case AST_LEAF:{
-            addVar(node->data.leaf);
+            add_var(node->data.leaf);
             break;
         }
         case AST_BINARY:
-            generateFunctionVars(node->data.binary.left);
-            generateFunctionVars(node->data.binary.right);
+            generate_function_vars(node->data.binary.left);
+            generate_function_vars(node->data.binary.right);
             break;
         case AST_LINKED_LIST:
             for(ast_node_t *item = node->data.llist.begin; 
                 item != NULL; item = item->data.llist_item.next)
                 {
-                    generateFunctionVars(item->data.llist_item.node);
+                    generate_function_vars(item->data.llist_item.node);
                 }
             break;
         case AST_FUNC_CALL:
-            generateFunctionVars(node->data.func_call.parameters);
+            generate_function_vars(node->data.func_call.parameters);
             break;
         case AST_WHILE_LOOP:
-            generateFunctionVars(node->data.while_statement.condition);
-            generateFunctionVars(node->data.while_statement.while_block);
+            generate_function_vars(node->data.while_statement.condition);
+            generate_function_vars(node->data.while_statement.while_block);
             break;
         case AST_IF_STATEMENT:
-            generateFunctionVars(node->data.if_statement.condition);
-            generateFunctionVars(node->data.if_statement.if_block);
-            generateFunctionVars(node->data.if_statement.else_block);
+            generate_function_vars(node->data.if_statement.condition);
+            generate_function_vars(node->data.if_statement.if_block);
+            generate_function_vars(node->data.if_statement.else_block);
             break;
         case AST_DECLARATION:
-            addVar(node->data.declaration.name);
-            generateFunctionVars(node->data.declaration.value);
+            add_var(node->data.declaration.name);
+            generate_function_vars(node->data.declaration.value);
             break;
         case AST_RETURN:
-            generateFunctionVars(node->data.return_node.value);
+            generate_function_vars(node->data.return_node.value);
             break;
         default: break;
     }
@@ -306,7 +306,7 @@ static void generateFunctionVars(const ast_node_t *node){
  */
 
  // TODO faster implementation with hash table
-static void addVar(char *name){
+static void add_var(char *name){
     for(int i = 0; i < varCount; i++){
         if(strcmp(name, varNames[i]) == 0) return;
     }
@@ -318,10 +318,10 @@ static void addVar(char *name){
  * @brief Pushes parameters of a function to the stack in reverse
  * @param node Pointer to first parameter
  */
-static void pushParametersReversed(const ast_node_t *node){
+static void push_parameters_reversed(const ast_node_t *node){
     if(node != NULL){
-        pushParametersReversed(node->data.llist_item.next);
-        generateNode(node->data.llist_item.node);
+        push_parameters_reversed(node->data.llist_item.next);
+        generate_node(node->data.llist_item.node);
     }
 }
 
@@ -341,7 +341,7 @@ void output(const char *fmt, ...){
  * @brief Correctly outputs escape sequences in IFJcode26
  * @param str string from AST
  */
-static void outputString(const char *str){
+static void output_string(const char *str){
     fprintf(dst, "PUSHS string@");
     for(int i = 0; i < strlen(str); i++){
         if(str[i] < 33 || str[i] == 35 || str[i] == 92){

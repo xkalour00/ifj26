@@ -20,7 +20,7 @@
  * @param root Root node of AST
  * @param out Pointer to file destination
  */
-void generateCode(const ast_node_t *root, FILE *out);
+int generate_code(const ast_node_t *root, FILE *out);
 
 /**
  * @brief Helper function for easier output of IFJcode26 instructions
