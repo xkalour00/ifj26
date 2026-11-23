@@ -17,6 +17,7 @@
 struct symtable {
   int scope_level;
   stack_t *scopes;
+  stack_t *popped_scopes;
 };
 
 /**
@@ -64,21 +65,26 @@ int symtable_init(symtable_t **symtable) {
   }
 
   new_symtable->scope_level = 0;
-  stack_t *stack;
-  if (stack_init(&stack, sizeof(hashtable_t *)) != 0) {
+  stack_t *scopes_stack;
+  if (stack_init(&scopes_stack, sizeof(hashtable_t *)) != 0) {
     free(new_symtable);
     new_symtable = NULL;
     return SYMTABLE_INTERNAL_ERROR;
   }
-  if (stack == NULL) {
+
+  stack_t *popped_stack;
+  if (stack_init(&popped_stack, sizeof(hashtable_t *)) != 0) {
+    stack_free(scopes_stack);
     free(new_symtable);
     new_symtable = NULL;
     return SYMTABLE_INTERNAL_ERROR;
   }
-  new_symtable->scopes = stack;
+  new_symtable->scopes = scopes_stack;
+  new_symtable->popped_scopes = popped_stack;
 
   if (symtable_scope_push(new_symtable) != SYMTABLE_SUCCESS) {
     stack_free(new_symtable->scopes);
+    stack_free(new_symtable->popped_scopes);
     free(new_symtable);
     new_symtable = NULL;
     return SYMTABLE_INTERNAL_ERROR;
@@ -165,17 +171,22 @@ int symtable_scope_push(symtable_t *symtable) {
   return SYMTABLE_SUCCESS;
 }
 
-void symtable_scope_pop(symtable_t *symtable) {
+int symtable_scope_pop(symtable_t *symtable) {
   if (symtable == NULL || symtable->scope_level <= 0) {
-    return;
+    return SYMTABLE_INTERNAL_ERROR;
   }
 
   hashtable_t *current_scope = get_current_scope(symtable);
   if (current_scope != NULL) {
-    scope_destroy(current_scope);
+    if (stack_push(symtable->popped_scopes, &current_scope) != 0) {
+      hashtable_free(current_scope);
+      return SYMTABLE_INTERNAL_ERROR;
+    }
     stack_pop(symtable->scopes);
     symtable->scope_level--;
   }
+
+  return SYMTABLE_SUCCESS;
 }
 
 void symtable_free(symtable_t *symtable) {
@@ -193,6 +204,18 @@ void symtable_free(symtable_t *symtable) {
     stack_pop(symtable->scopes);
   }
   stack_free(symtable->scopes);
+
+  while (!stack_is_empty(symtable->popped_scopes)) {
+    void *top_ptr = stack_top(symtable->popped_scopes);
+
+    if (top_ptr != NULL) {
+      hashtable_t *item = *(hashtable_t **)top_ptr;
+      scope_destroy(item);
+    }
+    stack_pop(symtable->popped_scopes);
+  }
+  stack_free(symtable->popped_scopes);
+
   symtable->scopes = NULL;
   free(symtable);
 }
