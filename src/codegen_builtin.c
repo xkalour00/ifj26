@@ -12,7 +12,7 @@
 /**
  * @brief generates the definition of builtin print function
  */
-void generatePrintDef(){
+void generate_print_def(){
     output("LABEL func_print");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -41,7 +41,7 @@ void generatePrintDef(){
 /**
  * @brief generates the definition of builtin readLine function
  */
-void generateReadLineDef(){
+void generate_read_line_def(){
     output("LABEL func_readLine");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -59,7 +59,7 @@ void generateReadLineDef(){
 /**
  * @brief generates the definition of builtin readInt function
  */
-void generateReadIntDef(){
+void generate_read_int_def(){
     output("LABEL func_readInt");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -82,7 +82,7 @@ void generateReadIntDef(){
 /**
  * @brief generates the definition of builtin readDouble function
  */
-void generateReadDoubleDef(){
+void generate_read_double_def(){
     output("LABEL func_readDouble");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -105,7 +105,7 @@ void generateReadDoubleDef(){
 /**
  * @brief generates the definition of builtin toStr function
  */
-void generateToStrDef(){
+void generate_to_str_def(){
     output("LABEL func_toStr");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -134,7 +134,7 @@ void generateToStrDef(){
 /**
  * @brief generates the definition of builtin toInt function
  */
-void generateToIntDef(){
+void generate_to_int_def(){
     output("LABEL func_toInt");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -152,7 +152,7 @@ void generateToIntDef(){
 /**
  * @brief generates the definition of builtin strLength function
  */
-void generateStrLengthDef(){
+void generate_str_length_def(){
     output("LABEL func_strLength");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -170,7 +170,7 @@ void generateStrLengthDef(){
 /**
  * @brief generates the definition of builtin subStr function
  */
-void generateSubStrDef(){
+void generate_sub_str_def(){
     output("LABEL func_subStr");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -222,7 +222,7 @@ void generateSubStrDef(){
 /**
  * @brief generates the definition of builtin ord function
  */
-void generateOrdDef(){
+void generate_ord_def(){
     output("LABEL func_ord");
     output("CREATEFRAME");
     output("PUSHFRAME");
@@ -256,7 +256,7 @@ void generateOrdDef(){
 /**
  * @brief generates the definition of builtin chr function
  */
-void generateChrDef(){
+void generate_chr_def(){
     output("LABEL func_chr");
     output("CREATEFRAME");
     output("PUSHFRAME");
