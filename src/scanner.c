@@ -15,12 +15,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SCANNER_RETURN_SUCCESS 0
-#define SCANNER_RETURN_LEXICAL_ERROR 1
-#define SCANNER_RETURN_INTERNAL_ERROR 99
+#define SCANNER_SUCCESS 0
+#define SCANNER_LEXICAL_ERROR 1
+#define SCANNER_INTERNAL_ERROR 99
 
 #define INITIAL_BUFFER_SIZE 256
 #define INDENT_BASE 0
+
+#define INTERNAL_ERROR_MSG "internal compiler error"
 
 typedef struct {
   char *buffer;
@@ -90,12 +92,20 @@ typedef struct {
 
 static scanner_variables_t *scanner_vars = NULL;
 
+static int return_error(int return_code, const char *msg, int line_number) {
+  if (return_code == SCANNER_INTERNAL_ERROR)
+    fprintf(stderr, "error: %s\n", msg);
+  else
+    fprintf(stderr, "error: %s at line %d\n", msg, line_number);
+  return return_code;
+}
+
 /**
  * @brief Add a character to the buffer
  * @param buffer The buffer to add the character to
  * @param c The character to add
- * @return SCANNER_RETURN_SUCCESS if the character was added,
- * SCANNER_RETURN_INTERNAL_ERROR otherwise
+ * @return SCANNER_SUCCESS if the character was added,
+ * SCANNER_INTERNAL_ERROR otherwise
  */
 static int buffer_add_char(buffer_t *buffer, char c) {
   if (buffer->index >=
@@ -103,7 +113,7 @@ static int buffer_add_char(buffer_t *buffer, char c) {
     size_t new_size = buffer->size * 2;
     char *new_buffer = realloc(buffer->buffer, new_size);
     if (new_buffer == NULL) {
-      return SCANNER_RETURN_INTERNAL_ERROR;
+      return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
     }
     buffer->buffer = new_buffer;
     buffer->size = new_size;
@@ -111,7 +121,7 @@ static int buffer_add_char(buffer_t *buffer, char c) {
   buffer->buffer[buffer->index] = c;
   buffer->index++;
   buffer->buffer[buffer->index] = '\0';
-  return SCANNER_RETURN_SUCCESS;
+  return SCANNER_SUCCESS;
 }
 
 /**
@@ -183,17 +193,17 @@ static bool is_keyword(const char *str, token_type_t *type) {
  * @brief Handle indentation tokens
  * @param tmp_spaces The number of spaces in the current line
  * @param type Pointer to the token type to be set
- * @return SCANNER_RETURN_SUCCESS if the indentation is correct,
- * SCANNER_RETURN_LEXICAL_ERROR if the indentation is incorrect and
- * SCANNER_RETURN_INTERNAL_ERROR if there was an internal error
+ * @return SCANNER_SUCCESS if the indentation is correct,
+ * SCANNER_LEXICAL_ERROR if the indentation is incorrect and
+ * SCANNER_INTERNAL_ERROR if there was an internal error
  */
 static int handle_indents(int tmp_spaces, token_type_t *type) {
   if (tmp_spaces > get_indentation()) {
     if (stack_push(scanner_vars->indent_stack, &tmp_spaces) != 0) {
-      return SCANNER_RETURN_INTERNAL_ERROR;
+      return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
     }
     *type = SP_INDENT;
-    return SCANNER_RETURN_SUCCESS;
+    return SCANNER_SUCCESS;
   } else if (tmp_spaces < get_indentation()) {
     while (tmp_spaces < get_indentation()) {
       stack_pop(scanner_vars->indent_stack);
@@ -202,11 +212,12 @@ static int handle_indents(int tmp_spaces, token_type_t *type) {
     if (tmp_spaces == get_indentation()) {
       scanner_vars->pending_dedents--;
       *type = SP_DEDENT;
-      return SCANNER_RETURN_SUCCESS;
+      return SCANNER_SUCCESS;
     }
   }
 
-  return SCANNER_RETURN_LEXICAL_ERROR;
+  return return_error(SCANNER_LEXICAL_ERROR, "inconsistent indentation",
+                      scanner_vars->line_number);
 }
 
 static int return_token(token_t **token, token_type_t type) {
@@ -226,36 +237,36 @@ static int return_token(token_t **token, token_type_t type) {
     if (type == INTEGER) {
       if (token_set_int(*token,
                         strtoll(scanner_vars->buffer->buffer, NULL, 10)) != 0) {
-        return SCANNER_RETURN_INTERNAL_ERROR;
+        return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
       }
       buffer_reset(scanner_vars->buffer);
     } else if (type == DOUBLE) {
       if (token_set_double(*token,
                            strtod(scanner_vars->buffer->buffer, NULL)) != 0) {
         token_free(*token);
-        return SCANNER_RETURN_INTERNAL_ERROR;
+        return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
       }
       buffer_reset(scanner_vars->buffer);
     } else if (type == IDENTIFIER || type == STRING) {
       if (token_set_string(*token, scanner_vars->buffer->buffer) != 0) {
         token_free(*token);
-        return SCANNER_RETURN_INTERNAL_ERROR;
+        return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
       }
       buffer_reset(scanner_vars->buffer);
     }
 
     if (token_set_line_number(*token, scanner_vars->line_number) != 0) {
       token_free(*token);
-      return SCANNER_RETURN_INTERNAL_ERROR;
+      return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
     }
 
     if (token_set_nl_before(*token, scanner_vars->nl_seen) == 0) {
       scanner_vars->nl_seen = false;
-      return SCANNER_RETURN_SUCCESS;
+      return SCANNER_SUCCESS;
     }
   }
 
-  return SCANNER_RETURN_INTERNAL_ERROR;
+  return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
 }
 
 static void newline_started(int *tmp_spaces, bool *has_tab) {
@@ -326,7 +337,9 @@ int get_next_token(token_t **token) {
           scanner_vars->parentheses++;
           return return_token(token, SP_OPENING_PARENTHESIS);
         } else if (c == ')') {
-          scanner_vars->parentheses--;
+          if (scanner_vars->parentheses != 0) {
+            scanner_vars->parentheses--;
+          }
           return return_token(token, SP_CLOSING_PARENTHESIS);
         } else if (c == '!') {
           state = S_NOT_EQUAL;
@@ -345,20 +358,27 @@ int get_next_token(token_t **token) {
         } else if (c == '_') {
           state = S_UNDERSCORE;
         } else if (isalpha(c)) {
-          buffer_add_char(scanner_vars->buffer, c);
+          if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+            return SCANNER_INTERNAL_ERROR;
+          }
           state = S_ID_OR_KW;
         } else if (c == '\"') {
           state = S_STRING_START;
         } else if (c == '0') {
-          buffer_add_char(scanner_vars->buffer, c);
+          if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+            return SCANNER_INTERNAL_ERROR;
+          }
           state = S_INT_ZERO;
         } else if (isdigit(c) && c != '0') {
-          buffer_add_char(scanner_vars->buffer, c);
+          if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+            return SCANNER_INTERNAL_ERROR;
+          }
           state = S_INT_CONTENT;
         } else if (c == '.') {
           state = S_DOT_OR_DOUBLE_START;
         } else {
-          return SCANNER_RETURN_LEXICAL_ERROR;
+          return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                              scanner_vars->line_number);
         }
       }
       break;
@@ -376,14 +396,16 @@ int get_next_token(token_t **token) {
         scanner_vars->pending_dedents--;
         return return_token(token, SP_DEDENT);
       } else {
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "inconsistent indentation",
+                            scanner_vars->line_number);
       }
       break;
     case S_NOT_EQUAL:
       if (c == '=') {
         return return_token(token, OP_NOT_EQUAL);
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_GREATER_OR_EQUAL:
       if (c == '=') {
@@ -413,30 +435,38 @@ int get_next_token(token_t **token) {
       if (c == 'm')
         state = S_AT_MAIN_MA;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_AT_MAIN_MA:
       if (c == 'a')
         state = S_AT_MAIN_MAI;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_AT_MAIN_MAI:
       if (c == 'i')
         state = S_AT_MAIN_MAIN;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_AT_MAIN_MAIN:
       if (c == 'n') {
         return return_token(token, SP_MAIN);
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_UNDERSCORE:
       if (isalpha(c) || isdigit(c) || c == '_') {
-        buffer_add_char(scanner_vars->buffer, '_');
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, '_') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_ID_OR_KW;
       } else {
         ungetc(c, stdin);
@@ -445,7 +475,9 @@ int get_next_token(token_t **token) {
       break;
     case S_ID_OR_KW:
       if (isalpha(c) || isdigit(c) || c == '_') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_ID_OR_KW;
       } else {
         ungetc(c, stdin);
@@ -458,10 +490,13 @@ int get_next_token(token_t **token) {
       else if (c == '\\')
         state = S_STRING_ESCAPE;
       else if (c != '\n' && c != EOF) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_STRING_CONTENT:
       if (c == '\\')
@@ -469,24 +504,38 @@ int get_next_token(token_t **token) {
       else if (c == '\"') {
         return return_token(token, STRING);
       } else if (c != '\n' && c != EOF) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_STRING_ESCAPE:
       if (c == '\\') {
-        buffer_add_char(scanner_vars->buffer, '\\');
+        if (buffer_add_char(scanner_vars->buffer, '\\') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
       } else if (c == '\"') {
-        buffer_add_char(scanner_vars->buffer, '\"');
+        if (buffer_add_char(scanner_vars->buffer, '\"') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
       } else if (c == 'n') {
-        buffer_add_char(scanner_vars->buffer, '\n');
+        if (buffer_add_char(scanner_vars->buffer, '\n') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
       } else if (c == 'r') {
-        buffer_add_char(scanner_vars->buffer, '\r');
+        if (buffer_add_char(scanner_vars->buffer, '\r') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
       } else if (c == 't') {
-        buffer_add_char(scanner_vars->buffer, '\t');
+        if (buffer_add_char(scanner_vars->buffer, '\t') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       state = S_STRING_CONTENT;
       break;
     case S_STRING_END:
@@ -501,35 +550,51 @@ int get_next_token(token_t **token) {
       if (c == '\"') {
         state = S_MULTILINE_STRING_END1;
       } else if (c != EOF) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (c == '\n') {
+          scanner_vars->line_number++;
+        }
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_STRING_END1:
       if (c == '\"') {
         state = S_MULTILINE_STRING_END2;
       } else if (c != EOF) {
         ungetc(c, stdin);
-        buffer_add_char(scanner_vars->buffer, '\"');
+        if (buffer_add_char(scanner_vars->buffer, '\"') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_STRING_END2:
       if (c == '\"') {
         state = S_MULTILINE_STRING_END3;
       } else if (c != EOF) {
         ungetc(c, stdin);
-        buffer_add_char(scanner_vars->buffer, '\"');
-        buffer_add_char(scanner_vars->buffer, '\"');
+        if (buffer_add_char(scanner_vars->buffer, '\"') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
+        if (buffer_add_char(scanner_vars->buffer, '\"') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_MULTILINE_STRING_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_STRING_END3:
       if (c == '\"') {
-        buffer_add_char(scanner_vars->buffer, '\"');
+        if (buffer_add_char(scanner_vars->buffer, '\"') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_MULTILINE_STRING_END3;
       } else {
         ungetc(c, stdin);
@@ -538,13 +603,19 @@ int get_next_token(token_t **token) {
       break;
     case S_INT_ZERO:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_INT_LEADING_ZEROS;
       } else if (c == '.') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_START;
       } else if (c == 'e' || c == 'E') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_START;
       } else if (c == '_') {
         state = S_INT_ZEROS_UNDERSCORE;
@@ -555,47 +626,67 @@ int get_next_token(token_t **token) {
       break;
     case S_INT_LEADING_ZEROS:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_INT_LEADING_ZEROS;
       } else if (c == '.') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_START;
       } else if (c == 'e' || c == 'E') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_START;
       } else if (c == '_') {
         state = S_INT_ZEROS_UNDERSCORE;
       } else {
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       }
       break;
     case S_INT_ZEROS_UNDERSCORE:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_INT_LEADING_ZEROS;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOUBLE_EXP_START:
       if (c == '+' || c == '-') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_SIGN;
       } else if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOUBLE_EXP_SIGN:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOUBLE_EXP_CONTENT:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_CONTENT;
       } else if (c == '_')
         state = S_DOUBLE_EXP_UNDERSCORE;
@@ -607,22 +698,31 @@ int get_next_token(token_t **token) {
       break;
     case S_DOUBLE_EXP_UNDERSCORE:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_INT_CONTENT:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_INT_CONTENT;
       } else if (c == '_')
         state = S_INT_UNDERSCORE;
       else if (c == 'e' || c == 'E') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_START;
       } else if (c == '.') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_START;
       } else {
         ungetc(c, stdin);
@@ -631,24 +731,34 @@ int get_next_token(token_t **token) {
       break;
     case S_INT_UNDERSCORE:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_INT_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOUBLE_DEC_START:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOUBLE_DEC_CONTENT:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_CONTENT;
       } else if (c == 'e' || c == 'E') {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_EXP_START;
       } else if (c == '_')
         state = S_DOUBLE_DEC_UNDERSCORE;
@@ -661,16 +771,25 @@ int get_next_token(token_t **token) {
       break;
     case S_DOUBLE_DEC_UNDERSCORE:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_CONTENT;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_DOT_OR_DOUBLE_START:
       if (isdigit(c)) {
-        buffer_add_char(scanner_vars->buffer, '0');
-        buffer_add_char(scanner_vars->buffer, '.');
-        buffer_add_char(scanner_vars->buffer, c);
+        if (buffer_add_char(scanner_vars->buffer, '0') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
+        if (buffer_add_char(scanner_vars->buffer, '.') != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
+        if (buffer_add_char(scanner_vars->buffer, c) != SCANNER_SUCCESS) {
+          return SCANNER_INTERNAL_ERROR;
+        }
         state = S_DOUBLE_DEC_CONTENT;
       } else {
         ungetc(c, stdin);
@@ -689,11 +808,13 @@ int get_next_token(token_t **token) {
         scanner_vars->count_spaces = false;
 
         if (has_tab)
-          return SCANNER_RETURN_LEXICAL_ERROR;
+          return return_error(SCANNER_LEXICAL_ERROR, "invalid indentation",
+                              scanner_vars->line_number);
 
         if (scanner_vars->parentheses > 0) {
           if (tmp_spaces <= get_indentation()) {
-            return SCANNER_RETURN_LEXICAL_ERROR;
+            return return_error(SCANNER_LEXICAL_ERROR, "invalid indentation",
+                                scanner_vars->line_number);
           } else {
             return return_token(token, OP_DIVIDE);
           }
@@ -704,7 +825,7 @@ int get_next_token(token_t **token) {
         } else {
           token_type_t type;
           int to_return = handle_indents(tmp_spaces, &type);
-          if (to_return == SCANNER_RETURN_SUCCESS) {
+          if (to_return == SCANNER_SUCCESS) {
             scanner_vars->pending_divide = true;
             return return_token(token, type);
           }
@@ -714,7 +835,8 @@ int get_next_token(token_t **token) {
         ungetc(c, stdin);
         return return_token(token, OP_DIVIDE);
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_LINE_CMNT:
       if (c == '\n') {
@@ -743,23 +865,29 @@ int get_next_token(token_t **token) {
         state = S_MULTILINE_CMNT_END;
       else if (c == '\n') {
         has_nl = true;
+        scanner_vars->line_number++;
         state = S_MULTILINE_CMNT_START;
       } else if (c != EOF)
         state = S_MULTILINE_CMNT_START;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_CMNT_NEST:
-      if (c == '*') {
+      if (c == '/') {
+        state = S_MULTILINE_CMNT_NEST;
+      } else if (c == '*') {
         star_count++;
         state = S_MULTILINE_CMNT_START;
       } else if (c == '\n') {
         has_nl = true;
+        scanner_vars->line_number++;
         state = S_MULTILINE_CMNT_START;
       } else if (c != EOF) {
         state = S_MULTILINE_CMNT_START;
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_CMNT_END:
       if (c == '*')
@@ -770,7 +898,6 @@ int get_next_token(token_t **token) {
           if (scanner_vars->parentheses > 0) {
             if (has_nl) {
               scanner_vars->nl_seen = true;
-              scanner_vars->line_number++;
               newline_started(&tmp_spaces, &has_tab);
               state = S_INDENT;
             } else {
@@ -787,10 +914,15 @@ int get_next_token(token_t **token) {
             state = S_START;
         } else
           state = S_MULTILINE_CMNT_START;
+      } else if (c == '\n') {
+        has_nl = true;
+        scanner_vars->line_number++;
+        state = S_MULTILINE_CMNT_START;
       } else if (c != EOF)
         state = S_MULTILINE_CMNT_START;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_MULTILINE_CMNT_EOL:
       if (c == ' ')
@@ -806,7 +938,8 @@ int get_next_token(token_t **token) {
       } else if (c == EOF)
         state = S_EOF;
       else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
       break;
     case S_INDENT:
       if (c == '/')
@@ -836,7 +969,8 @@ int get_next_token(token_t **token) {
         scanner_vars->count_spaces = false;
         if (scanner_vars->parentheses > 0) {
           if (tmp_spaces <= get_indentation()) {
-            return SCANNER_RETURN_LEXICAL_ERROR;
+            return return_error(SCANNER_LEXICAL_ERROR, "invalid indentation",
+                                scanner_vars->line_number);
           }
           state = S_START;
         } else if (tmp_spaces == get_indentation()) {
@@ -844,12 +978,13 @@ int get_next_token(token_t **token) {
         } else {
           token_type_t type;
           int to_return = handle_indents(tmp_spaces, &type);
-          if (to_return == SCANNER_RETURN_SUCCESS)
+          if (to_return == SCANNER_SUCCESS)
             return return_token(token, type);
           return to_return;
         }
       } else
-        return SCANNER_RETURN_LEXICAL_ERROR;
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid indentation",
+                            scanner_vars->line_number);
       break;
     }
   }
@@ -858,7 +993,7 @@ int get_next_token(token_t **token) {
 int scanner_init() {
   scanner_vars = malloc(sizeof(scanner_variables_t));
   if (scanner_vars == NULL) {
-    return SCANNER_RETURN_INTERNAL_ERROR;
+    return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
   }
   scanner_vars->parentheses = 0;
   scanner_vars->pending_dedents = 0;
@@ -870,21 +1005,21 @@ int scanner_init() {
 
   if (stack_init(&scanner_vars->indent_stack, sizeof(int)) != 0) {
     free(scanner_vars);
-    return SCANNER_RETURN_INTERNAL_ERROR;
+    return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
   }
 
   int indent_base = INDENT_BASE;
   if (stack_push(scanner_vars->indent_stack, &indent_base) != 0) {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars);
-    return SCANNER_RETURN_INTERNAL_ERROR;
+    return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
   }
 
   scanner_vars->buffer = malloc(sizeof(buffer_t));
   if (scanner_vars->buffer == NULL) {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars);
-    return SCANNER_RETURN_INTERNAL_ERROR;
+    return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
   }
 
   scanner_vars->buffer->buffer = malloc(INITIAL_BUFFER_SIZE);
@@ -892,13 +1027,13 @@ int scanner_init() {
     stack_free(scanner_vars->indent_stack);
     free(scanner_vars->buffer);
     free(scanner_vars);
-    return SCANNER_RETURN_INTERNAL_ERROR;
+    return return_error(SCANNER_INTERNAL_ERROR, INTERNAL_ERROR_MSG, -1);
   }
   scanner_vars->buffer->size = INITIAL_BUFFER_SIZE;
   scanner_vars->buffer->index = 0;
   scanner_vars->buffer->buffer[0] = '\0';
 
-  return SCANNER_RETURN_SUCCESS;
+  return SCANNER_SUCCESS;
 }
 
 void scanner_free() {
