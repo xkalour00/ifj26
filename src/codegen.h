@@ -15,6 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef enum {
+    GEN_DISCARD,
+    GEN_PUSH,
+} gen_mode;
+
 /**
  * @brief Main function for generating code from AST
  * @param root Root node of AST

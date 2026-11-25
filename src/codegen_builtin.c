@@ -48,8 +48,14 @@ void generate_read_line_def(){
 
     output("DEFVAR LF@result_string");
     output("READ LF@result_string string");
+    output("JUMPIFEQ print_EOF LF@result_string nil@nil");
 
     output("PUSHS LF@result_string");
+    output("POPFRAME");
+    output("RETURN");
+
+    output("LABEL print_EOF");
+    output("PUSHS string@");
     output("POPFRAME");
     output("RETURN");
     output("");
@@ -103,6 +109,30 @@ void generate_read_double_def(){
 }
 
 /**
+ * @brief generates the definition of builtin readBoolean function
+ */
+void generate_read_boolean_def(){
+    output("LABEL func_readBoolean");
+    output("CREATEFRAME");
+    output("PUSHFRAME");
+
+    output("DEFVAR LF@result_boolean");
+    output("READ LF@result_boolean bool");
+    output("JUMPIFEQ readBoolean_result_nil LF@result_boolean nil@nil");
+
+    output("PUSHS LF@result_boolean");
+    output("POPFRAME");
+    output("RETURN");
+
+    output("LABEL readBoolean_result_nil");
+    output("PUSHS float@0x0p+0");
+    output("POPFRAME");
+    output("RETURN");
+    output("");
+}
+
+
+/**
  * @brief generates the definition of builtin toStr function
  */
 void generate_to_str_def(){
@@ -117,12 +147,28 @@ void generate_to_str_def(){
 
     output("JUMPIFEQ toStr_value_int LF@type_value string@int");
     output("JUMPIFEQ toStr_value_double LF@type_value string@float");
+    output("JUMPIFEQ toStr_value_nil LF@type_value string@nil");
+    output("JUMPIFEQ toStr_value_bool LF@type_value string@bool");
     output("JUMP toStr_end");
+
     output("LABEL toStr_value_int");
     output("INT2STR LF@value LF@value");
     output("JUMP toStr_end");
+
     output("LABEL toStr_value_double");
     output("FLOAT2STR LF@value LF@value");
+    output("JUMP toStr_end");
+
+    output("LABEL toStr_value_nil");
+    output("MOVE LF@value string@");
+    output("JUMP toStr_end");
+
+    output("LABEL toStr_value_bool");
+    output("JUMPIFEQ toStr_is_true LF@value bool@true");
+    output("MOVE LF@value string@false");
+    output("JUMP toStr_end");
+    output("LABEL toStr_is_true");
+    output("MOVE LF@value string@true");
 
     output("LABEL toStr_end");
     output("PUSHS LF@value");
@@ -165,6 +211,7 @@ void generate_str_length_def(){
     output("POPFRAME");
     output("RETURN");
     output("");
+    // - 1?
 }
 
 /**
@@ -239,6 +286,7 @@ void generate_ord_def(){
     output("STRLEN LF@strlen LF@value");
     output("LT LF@error LF@index LF@strlen");
     output("JUMPIFEQ ord_error LF@error bool@false");
+    output("JUMPIFEQ ord_error LF@value string@");
 
     output("DEFVAR LF@ascii");
     output("STRI2INT LF@ascii LF@value LF@index");
