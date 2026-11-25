@@ -9,22 +9,23 @@
 #include "codegen.h"
 #include "ast.h"
 #include "codegen_builtin.h"
+#include "hashtable.h"
 
-#define MAX_VARS 1000
+#define INTERNAL_ERR 99
+#define GEN_SUCCESS 0
 
-static char *varNames[MAX_VARS];
-static int varCount = 0;
 static FILE *dst;
 static int labelCounter = 0;
+static hashtable_t *hashtable = NULL;
 
 static int generate_node(const ast_node_t *node, const gen_mode mode);
-static void add_var(char *name);
-static void generate_function_vars(const ast_node_t *node);
+static int add_var(char *name);
+static int collect_function_vars(const ast_node_t *node);
 static void push_parameters_reversed(const ast_node_t *node);
 static void output_string(const char *str);
 
 /**
- * @brief 
+ * @brief Generates header, global variables and all function definitions
  * @param root Root node of AST
  * @param out Pointer to file destination
  * @return Error code
@@ -50,6 +51,7 @@ int generate_code(const ast_node_t *root, FILE *out){
     generate_read_line_def();
     generate_read_int_def();
     generate_read_double_def();
+    generate_read_boolean_def();
     generate_to_str_def();
     generate_to_int_def();
     generate_str_length_def();
@@ -57,12 +59,22 @@ int generate_code(const ast_node_t *root, FILE *out){
     generate_ord_def();
     generate_chr_def();
 
+    if(hashtable_init(&hashtable) != 0){
+        return INTERNAL_ERR;
+    }
+
     for(ast_node_t *item = root->data.root.func_def_list->data.llist.begin; 
         item != NULL; item = item->data.llist_item.next)
         {
-            generate_node(item->data.llist_item.node, GEN_DISCARD);
+            if(generate_node(item->data.llist_item.node, GEN_DISCARD) != 0) {
+                hashtable_free(hashtable);
+                hashtable = NULL;
+                return INTERNAL_ERR;
+            }
         }
-    return 0;
+    hashtable_free(hashtable);
+    hashtable = NULL;
+    return GEN_SUCCESS;
 }
 
 /**
@@ -72,7 +84,7 @@ int generate_code(const ast_node_t *root, FILE *out){
  */
 static int generate_node(const ast_node_t *node, const gen_mode mode){
 
-    if(!node) return 0;
+    if(!node) return GEN_SUCCESS;
 
     switch(node->type) {
         // implicit conversion of integer node
@@ -106,6 +118,7 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
                 break;
             }
 
+            // short circuit evaluation of and
             // if(node->data.binary.binary_type == AST_AND){
             //     generate_node(node->data.binary.left);
             //     output("PUSHS bool@false");
@@ -121,6 +134,7 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
             //     break;
             // }
 
+            // short circuit evaluation of or
             // if(node->data.binary.binary_type == AST_OR){
             //     generate_node(node->data.binary.left);
             //     output("PUSHS bool@true");
@@ -246,17 +260,17 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
             output("CREATEFRAME");
             output("PUSHFRAME");
 
-            // reset varCount for each function definition
-            varCount = 0;
+            hashtable_clear(hashtable);
             if(node->data.func_def.parameters){
                 for(ast_node_t *item = node->data.func_def.parameters->data.llist.begin;
                     item != NULL; item = item->data.llist_item.next)
                     {
-                        add_var(item->data.llist_item.node->data.declaration.name);
+                        if(add_var(item->data.llist_item.node->data.declaration.name) != 0) return INTERNAL_ERR;
                         output("POPS LF@%s", item->data.llist_item.node->data.declaration.name);
                 }
             }
-            generate_function_vars(node->data.func_def.tree_list);
+            collect_function_vars(node->data.func_def.tree_list);
+            // TODO add GEN_DISCARD if function is of UNIT type
             generate_node(node->data.func_def.tree_list, GEN_PUSH);
             output("");
             break;
@@ -349,9 +363,7 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
         
         case AST_FOR_LOOP:{
             int id = labelCounter++;
-            generate_node(node->data.for_loop.gen_start, GEN_PUSH);
-            output("DEFVAR GF@for_start%d", id);
-            output("POPS GF@for_start%d", id);
+            generate_node(node->data.for_loop.gen_start, GEN_DISCARD);
             generate_node(node->data.for_loop.gen_end, GEN_PUSH);
             output("DEFVAR GF@for_end%d", id);
             output("POPS GF@for_end%d", id);
@@ -374,20 +386,21 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
 
             output("LABEL for_loop_increment_start%d", id);
             // increment iteration counter
-            output("ADD GF@for_start%d GF@for_start%d GF@for_step%d", id, id, id);
+            output("ADD LF@%s LF@%s GF@for_step%d", node->data.for_loop.gen_start->data.declaration.name, 
+                                                    node->data.for_loop.gen_start->data.declaration.name, id);
             output("LABEL for_loop_start%d", id);
             // check for end of for loop based on (to / until)
             if(node->data.for_loop.gen_is_to){
-                output("GT GF@tmp GF@for_start%d GF@for_end%d", id, id);
+                output("GT GF@tmp LF@%s GF@for_end%d", node->data.for_loop.gen_start->data.declaration.name, id);
             }
             else{
-                output("LT GF@tmp GF@for_start%d GF@for_end%d", id, id);
+                output("LT GF@tmp LF@%s GF@for_end%d", node->data.for_loop.gen_start->data.declaration.name, id);
                 output("NOT GF@tmp GF@tmp");
             }
             output("JUMPIFEQ for_loop_end%d GF@tmp bool@true", id);
             
             // generate all guards
-            // currently only skips iteration if guard is false
+            // currently only skips iteration if guard is false (check) TODO
             for(ast_node_t *item = node->data.for_loop.llist_guards->data.llist.begin;
                 item != NULL; item = item->data.llist_item.next)
                 {
@@ -404,77 +417,82 @@ static int generate_node(const ast_node_t *node, const gen_mode mode){
         }
     }
 
-    return 0;
+    return GEN_SUCCESS;
 }
 
 /**
  * @brief Collects all variables found in a function
  * @param node Pointer to beginning of function code block
  */
-static void generate_function_vars(const ast_node_t *node){
+static int collect_function_vars(const ast_node_t *node){
     
-    if(!node) return;
+    if(!node) return GEN_SUCCESS;
 
     switch(node->type) {
         case AST_LEAF:{
-            add_var(node->data.leaf);
+            if(add_var(node->data.leaf) != 0) return INTERNAL_ERR;
             break;
         }
         case AST_BINARY:
-            generate_function_vars(node->data.binary.left);
-            generate_function_vars(node->data.binary.right);
+            collect_function_vars(node->data.binary.left);
+            collect_function_vars(node->data.binary.right);
             break;
         case AST_LINKED_LIST:
             for(ast_node_t *item = node->data.llist.begin; 
                 item != NULL; item = item->data.llist_item.next)
                 {
-                    generate_function_vars(item->data.llist_item.node);
+                    collect_function_vars(item->data.llist_item.node);
                 }
             break;
         case AST_FUNC_CALL:
-            generate_function_vars(node->data.func_call.parameters);
+            collect_function_vars(node->data.func_call.parameters);
             break;
         case AST_WHILE_LOOP:
-            generate_function_vars(node->data.while_statement.condition);
-            generate_function_vars(node->data.while_statement.while_block);
+            collect_function_vars(node->data.while_statement.condition);
+            collect_function_vars(node->data.while_statement.while_block);
             break;
         case AST_IF_STATEMENT:
-            generate_function_vars(node->data.if_statement.condition);
-            generate_function_vars(node->data.if_statement.if_block);
-            generate_function_vars(node->data.if_statement.else_block);
+            collect_function_vars(node->data.if_statement.condition);
+            collect_function_vars(node->data.if_statement.if_block);
+            collect_function_vars(node->data.if_statement.else_block);
             break;
         case AST_DECLARATION:
-            add_var(node->data.declaration.name);
-            generate_function_vars(node->data.declaration.value);
+            if(add_var(node->data.declaration.name) != 0) return INTERNAL_ERR;
+            collect_function_vars(node->data.declaration.value);
             break;
         case AST_RETURN:
-            generate_function_vars(node->data.return_node.value);
+            collect_function_vars(node->data.return_node.value);
             break;
         case AST_ELSE_IF_STATEMENT:
-            generate_function_vars(node->data.else_if.cond);
-            generate_function_vars(node->data.else_if.else_if_block);
+            collect_function_vars(node->data.else_if.cond);
+            collect_function_vars(node->data.else_if.else_if_block);
+            break;
         case AST_FOR_LOOP:
-            generate_function_vars(node->data.for_loop.gen_start);
-            generate_function_vars(node->data.for_loop.gen_end);
-            generate_function_vars(node->data.for_loop.gen_step);
-            generate_function_vars(node->data.for_loop.llist_guards);
-            generate_function_vars(node->data.for_loop.code_block);
+            collect_function_vars(node->data.for_loop.gen_start);
+            collect_function_vars(node->data.for_loop.gen_end);
+            collect_function_vars(node->data.for_loop.gen_step);
+            collect_function_vars(node->data.for_loop.llist_guards);
+            collect_function_vars(node->data.for_loop.code_block);
+            break;
         default: break;
     }
+    return GEN_SUCCESS;
 }
 
 /**
  * @brief Checks name of variable for duplicates and defines it in IFJCode26
  * @param name Variable name
  */
+static int add_var(char *name){
+    bool found;
+    void *value = (void *)1;
 
- // TODO faster implementation with hash table
-static void add_var(char *name){
-    for(int i = 0; i < varCount; i++){
-        if(strcmp(name, varNames[i]) == 0) return;
+    if(hashtable_find_or_insert(hashtable, name, &found, &value) != 0){
+        return INTERNAL_ERR;
     }
-    varNames[varCount++] = name;
-    output("DEFVAR LF@%s", name);
+    if(!found) output("DEFVAR LF@%s", name);
+
+    return GEN_SUCCESS;
 }
  
 /**
