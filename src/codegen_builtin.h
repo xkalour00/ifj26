@@ -13,6 +13,7 @@ void generate_print_def();
 void generate_read_line_def();
 void generate_read_int_def();
 void generate_read_double_def();
+void generate_read_boolean_def();
 void generate_to_str_def();
 void generate_to_int_def();
 void generate_str_length_def();
