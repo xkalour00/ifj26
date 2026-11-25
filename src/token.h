@@ -3,12 +3,13 @@
  *
  * @brief FIT VUT | IFJ Project 2026 - token structure definition
  * @author Filip Obermajer (xobermf00)
- * @date 2026-10-17
+ * @date 2026-11-21
  */
 
 #ifndef TOKEN_H
 #define TOKEN_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef enum token_type {
@@ -162,6 +163,50 @@ int token_set_string(token_t *token, const char *value);
  * @return 0 on success, non-zero on failure
  */
 int token_get_string(const token_t *token, const char **value);
+
+/**
+ * @brief Gets the new-line before flag of a token
+ *
+ * @param[in] token pointer to the token whose new-line before flag is to be
+ * retrieved
+ * @param[out] nl_before_val pointer to the location where the new-line before
+ * flag will be stored
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_get_nl_before(const token_t *token, bool *nl_before_val);
+
+/**
+ * @brief Sets the new-line before flag of a token
+ *
+ * @param[in,out] token pointer to the token whose new-line before flag is
+ * to be set
+ * @param[in] nl_before_val new-line before flag
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_set_nl_before(token_t *token, bool nl_before_val);
+
+/**
+ * @brief Gets the line number of a token
+ *
+ * @param[in] token pointer to the token whose line number is to be retrieved
+ * @param[out] line_number pointer to the location where the line number will be
+ * stored
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_get_line_number(const token_t *token, int *line_number);
+
+/**
+ * @brief Sets the line number of a token
+ *
+ * @param[in,out] token pointer to the token whose line number is to be set
+ * @param[in] line_number new line number
+ *
+ * @return 0 on success, non-zero on failure
+ */
+int token_set_line_number(token_t *token, int line_number);
 
 /**
  * @brief Frees a token

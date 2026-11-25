@@ -3,7 +3,7 @@
  *
  * @brief FIT VUT | IFJ Project 2026 - token structure implementation
  * @author Filip Obermajer (xobermf00)
- * @date 2026-10-17
+ * @date 2026-11-21
  */
 
 #include "token.h"
@@ -23,6 +23,8 @@ typedef union token_attribute {
 struct token {
   token_type_t type;
   token_attribute_t attribute;
+  bool nl_before;
+  int line_number;
 };
 
 int token_init(token_t **token, token_type_t type) {
@@ -37,6 +39,8 @@ int token_init(token_t **token, token_type_t type) {
   if (type == STRING || type == IDENTIFIER) {
     (*token)->attribute.string_value = NULL;
   }
+  (*token)->nl_before = false;
+  (*token)->line_number = 0;
   return TOKEN_RETURN_SUCCESS;
 }
 
@@ -120,6 +124,38 @@ int token_get_string(const token_t *token, const char **value) {
     return TOKEN_RETURN_FAILURE;
   }
   *value = token->attribute.string_value;
+  return TOKEN_RETURN_SUCCESS;
+}
+
+int token_get_nl_before(const token_t *token, bool *nl_before_val) {
+  if (token == NULL || nl_before_val == NULL) {
+    return TOKEN_RETURN_FAILURE;
+  }
+  *nl_before_val = token->nl_before;
+  return TOKEN_RETURN_SUCCESS;
+}
+
+int token_set_nl_before(token_t *token, bool nl_before_val) {
+  if (token == NULL) {
+    return TOKEN_RETURN_FAILURE;
+  }
+  token->nl_before = nl_before_val;
+  return TOKEN_RETURN_SUCCESS;
+}
+
+int token_get_line_number(const token_t *token, int *line_number) {
+  if (token == NULL || line_number == NULL) {
+    return TOKEN_RETURN_FAILURE;
+  }
+  *line_number = token->line_number;
+  return TOKEN_RETURN_SUCCESS;
+}
+
+int token_set_line_number(token_t *token, int line_number) {
+  if (token == NULL) {
+    return TOKEN_RETURN_FAILURE;
+  }
+  token->line_number = line_number;
   return TOKEN_RETURN_SUCCESS;
 }
 
