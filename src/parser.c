@@ -22,8 +22,23 @@
 
 token_t *current_token_parser = NULL;
 token_type_t current_token_type_parser;
+token_type_t prev_token_type_parser;
 static ast_node_t *root;
 symtable_t *symtable = NULL;
+
+
+static const char *tok_name(token_type_t t){
+    static const char *n[] = {"IDENTIFIER","INTEGER","DOUBLE","STRING","KW_DEF","KW_DO","KW_DOUBLE",
+        "KW_ELSE","KW_IF","KW_IMPORT","KW_INT","KW_RETURN","KW_STRING","KW_THEN","KW_UNIT","KW_VAL",
+        "KW_VAR","KW_WHILE","KW_BOOLEAN","KW_CASE","KW_CLASS","KW_EXTENSION","KW_FOR","KW_LIST",
+        "KW_MATCH","KW_TYPE","KW_FALSE","KW_TRUE","OP_NOT","OP_AND","OP_OR","KW_BY","KW_UNTIL","KW_TO",
+        "OP_PLUS","OP_MINUS","OP_MULTIPLY","OP_DIVIDE","OP_EQUAL","OP_NOT_EQUAL","OP_ASSIGN","OP_LESS",
+        "OP_LESS_OR_EQUAL","OP_GREATER","OP_GREATER_OR_EQUAL","SP_INDENT","SP_DEDENT","SP_EOL","SP_EOF",
+        "SP_MAIN","SP_COLON","SP_COMMA","SP_DOT","SP_UNDERSCORE","SP_OPENING_PARENTHESIS",
+        "SP_CLOSING_PARENTHESIS","SP_ARROW"};
+    return n[t];
+}
+
 
 
 
@@ -46,25 +61,37 @@ static ast_node_t* parse_var(void);
 static ast_node_t* parse_val(void);
 static ast_node_t* parse_return(void);
 static ast_node_t* parse_return_value(void);
-static ast_node_t* parse_if();
+
 static ast_node_t* parse_while(void);
 static ast_node_t* parse_id_expr_or_funcall(void);
+static ast_node_t* parse_body(void);
+static ast_node_t* parse_else_part(bool is_expr,ast_node_t*elsifs);
+static ast_node_t* parse_else_if_or_else(bool is_expr,ast_node_t* elsifs);
+static ast_node_t* parse_optional_eol(void);
+static ast_node_t* parse_else_body(bool is_expr);
+static ast_node_t* parse_for(void);
+static ast_node_t* parse_for_body(void);
+static void parse_guards(ast_node_t** end, ast_node_t** by, bool *is_to);
+static ast_node_t* parse_by_optional(void);
+static ast_node_t* parse_indented_for(void);
+static ast_node_t* parse_for_conditions(ast_node_t* guards);
 
 
 
 
+// char* make_unique_name(char* name){
 
-char* make_unique_name(char* name){
-    symbol_t* symbol = symtable_find(symtable,name);
-    if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
-    return str_dup(symbol->declaration->data.declaration.name);
-}
+//     symbol_t* symbol = symtable_find(symtable,name);
+//     if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
+//     return str_dup(symbol->declaration->data.declaration.name);
+// }
 
 
 void fail(int code){ 
   if (current_token_parser) token_free(current_token_parser);
   scanner_free();
   free_tree(root);
+
   symtable_free(symtable);
   exit(code);
 }
@@ -80,6 +107,7 @@ char *str_dup(const char *s) {
 }
 
 void consume(void){
+    prev_token_type_parser = current_token_type_parser;
   if(current_token_parser){ 
     token_free(current_token_parser); 
     current_token_parser = NULL;
@@ -87,7 +115,8 @@ void consume(void){
 
   if(get_next_token(&current_token_parser) != 0){ 
     fail(LEXICAL_ERROR);
-    } 
+    }
+  fprintf(stderr, "token: %s\n", tok_name(current_token_type_parser));
   token_get_type(current_token_parser, &current_token_type_parser);
 }   
 
@@ -188,6 +217,9 @@ static return_type_t parse_type(void){
         case KW_UNIT:
             consume();
             return RETURN_UNIT;
+        case KW_BOOLEAN:
+            consume();
+            return RETURN_BOOLEAN;
         default:
             fail(SYNTAX_ERROR);
             return RETURN_UNKNOWN;
@@ -210,7 +242,8 @@ static ast_node_t* parse_param_existing(void){
     expect(SP_COLON);
     return_type_t return_type = parse_type();
     ast_node_t *n = make_declaration_node(name,return_type,NULL);
-    symtable_insert(symtable,n,false,true);
+
+    if(symtable_insert(symtable,n,false,true)!= 0) fail(REDEFINITION);
     return n;
 }
 
@@ -305,7 +338,7 @@ static ast_node_t* parse_definition(bool is_main){
     consume();
     expect(SP_OPENING_PARENTHESIS);
 
-    symtable_scope_push(symtable);
+    if(symtable_scope_push(symtable) != 0) fail(MALLOC_FAIL);
 
     ast_node_t * params = parse_params();
     expect(SP_CLOSING_PARENTHESIS);
@@ -336,8 +369,8 @@ static ast_node_t* parse_definition(bool is_main){
     else{
         n = root->data.root.func_def_list->data.llist.end->data.llist_item.node;
     }
-
-    symtable_insert(symtable,n,true,true);
+  
+    if(symtable_insert(symtable,n,true,true) != 0) fail(REDEFINITION);
     return n;
 
 }
@@ -379,10 +412,15 @@ static ast_node_t* parse_def_body(void){
         current_token_type_parser == OP_MINUS ||
         current_token_type_parser == INTEGER ||
         current_token_type_parser == STRING ||
-        current_token_type_parser == DOUBLE){
+        current_token_type_parser == DOUBLE ||
+        current_token_type_parser == OP_NOT ||
+        current_token_type_parser == KW_TRUE ||
+        current_token_type_parser == KW_FALSE ||
+        current_token_type_parser == KW_IF){ 
         ast_node_t *body = init_llist();
         add_llist_item(body,make_node(AST_RETURN,parse_precedence(NULL)));
-        expect(SP_EOL);
+        if(prev_token_type_parser != SP_DEDENT) expect(SP_EOL);
+        //expect(SP_EOL);
         return body;
     }
     fail(SYNTAX_ERROR);
@@ -396,12 +434,12 @@ static ast_node_t* parse_def_body(void){
 
 static ast_node_t* parse_indented_block(){
     expect(SP_INDENT);
-
-    symtable_scope_push(symtable);
+  
+    if(symtable_scope_push(symtable) != 0) fail(MALLOC_FAIL);
 
     ast_node_t* block = parse_block();
 
-    symtable_scope_pop(symtable);
+   symtable_scope_pop(symtable);
 
     expect(SP_DEDENT);
     return block;
@@ -440,10 +478,12 @@ static ast_node_t* parse_var(){
     return_type_t type = parse_return_type();
     expect(OP_ASSIGN);
     ast_node_t *expr = parse_precedence(NULL);
-    expect(SP_EOL);
+    if(prev_token_type_parser != SP_DEDENT) expect(SP_EOL);
+    //expect(SP_EOL);
 
     ast_node_t *n = make_declaration_node(name,type,expr);
-    symtable_insert(symtable,n,false,false);
+
+    if(symtable_insert(symtable,n,false,false) != 0) fail(REDEFINITION);
     return n;
 }
 
@@ -464,10 +504,12 @@ static ast_node_t* parse_val(){
     return_type_t type = parse_return_type();
     expect(OP_ASSIGN);
     ast_node_t *expr = parse_precedence(NULL);
-    expect(SP_EOL);
+    if(prev_token_type_parser != SP_DEDENT) expect(SP_EOL);
+    //expect(SP_EOL);
 
     ast_node_t *n = make_declaration_node(name,type,expr);
-    symtable_insert(symtable,n,false,true);
+
+    if(symtable_insert(symtable,n,false,true) != 0) fail(REDEFINITION);
     return n;
 }
 
@@ -479,7 +521,8 @@ static ast_node_t* parse_val(){
 static ast_node_t* parse_return(){
     expect(KW_RETURN);
     ast_node_t *value = parse_return_value();
-    expect(SP_EOL);
+    if(prev_token_type_parser != SP_DEDENT) expect(SP_EOL);
+    //expect(SP_EOL);
     return make_node(AST_RETURN, value);
 }
 
@@ -499,7 +542,11 @@ static ast_node_t* parse_return_value(){
         current_token_type_parser == OP_MINUS ||
         current_token_type_parser == INTEGER ||
         current_token_type_parser == DOUBLE ||
-        current_token_type_parser == STRING)  {
+        current_token_type_parser == STRING ||
+        current_token_type_parser == OP_NOT ||
+        current_token_type_parser == KW_TRUE ||
+        current_token_type_parser == KW_FALSE ||
+        current_token_type_parser == KW_IF)  { 
         return parse_precedence(NULL);
         
     }
@@ -507,24 +554,311 @@ static ast_node_t* parse_return_value(){
     return NULL;
 }
 
+static ast_node_t* parse_optional_eol(void){
+    switch(current_token_type_parser){
+        case SP_EOL:
+            consume();
+            return NULL;
+        case KW_ELSE:
+        case KW_VAL:
+        case KW_VAR:
+        case KW_IF:
+        case KW_WHILE:
+        case KW_RETURN:
+        case IDENTIFIER:
+        case SP_OPENING_PARENTHESIS:
+        case OP_MINUS:
+        case INTEGER:
+        case DOUBLE:
+        case STRING:
+        case OP_NOT:
+        case KW_TRUE:
+        case KW_FALSE:
+        case KW_FOR:
+        case SP_DEDENT:
+            return NULL;
+        default:
+            fail(SYNTAX_ERROR);
+            return NULL;
+    }
+
+}
+static ast_node_t* parse_else_body(bool is_expr){
+    switch(current_token_type_parser){
+            case IDENTIFIER:
+            case SP_OPENING_PARENTHESIS:
+            case OP_MINUS:
+            case INTEGER:
+            case DOUBLE:
+            case STRING:
+            case OP_NOT:
+            case KW_TRUE:
+            case KW_FALSE:
+                ast_node_t *block = init_llist();
+                if(!block) fail(MALLOC_FAIL);
+                add_llist_item(block,parse_precedence(NULL));
+                if(!is_expr) expect(SP_EOL);
+                return block;
+
+            case SP_EOL:
+                consume();
+                return parse_indented_block();
+                
+            default:
+                fail(SYNTAX_ERROR);
+                return NULL;
+    }               
+}
+
+static void parse_guards(ast_node_t **end, ast_node_t** by, bool *is_to){
+    *by = NULL;
+    switch(current_token_type_parser){
+        case KW_TO:
+            consume(); 
+            *end = parse_precedence(NULL);
+            *by = parse_by_optional();
+            *is_to = true;
+            return;
+        case KW_UNTIL:
+            consume();
+            *end = parse_precedence(NULL);
+            *is_to = false;
+            return;
+        default:
+            fail(SYNTAX_ERROR);
+            return;
+    }
+}
+
+static ast_node_t* parse_by_optional(void){
+    switch(current_token_type_parser){
+        case KW_BY:
+            consume();
+            return parse_precedence(NULL);
+        case KW_DO:
+        case SP_EOL:
+            return NULL;
+        default:
+            fail(SYNTAX_ERROR);
+            return NULL;
+    }
+}
+
+
+static ast_node_t* parse_indented_for(void){
+    expect(SP_INDENT);
+    const char *tmp;
+    char* name;
+    if(current_token_type_parser == IDENTIFIER){
+        token_get_string(current_token_parser, &tmp);
+        name = str_dup(tmp);
+    }
+    expect(IDENTIFIER);
+    expect(SP_ARROW);
+    ast_node_t* value = parse_precedence(NULL);
+    ast_node_t* i = make_declaration_node(name,RETURN_INT,value); 
+    if(symtable_insert(symtable,i,false,true) != 0) fail(REDEFINITION);
+    ast_node_t *by;
+    ast_node_t *end;
+    bool is_to;
+    parse_guards(&end,&by,&is_to);
+    expect(SP_EOL);
+    ast_node_t* llist = init_llist();
+    if(!llist) fail(MALLOC_FAIL);
+
+    ast_node_t* guards  = parse_for_conditions(llist);
+    expect(SP_DEDENT);
+    expect(KW_DO);
+    ast_node_t* body = parse_for_body();
+    ast_node_t* n = make_for_loop_node(i,end,by,is_to,guards,body);
+    if(!n) fail(MALLOC_FAIL);
+    return n;
+}
+
+static ast_node_t* parse_for_conditions(ast_node_t* guards){
+    switch(current_token_type_parser){
+        case KW_IF:
+            consume();
+            add_llist_item(guards,parse_precedence(NULL));
+            expect(SP_EOL);
+            
+            return parse_for_conditions(guards);
+        case SP_DEDENT:
+            return guards;
+        default:
+            fail(SYNTAX_ERROR);
+            return NULL;
+    }
+}
+
+static ast_node_t* parse_for(){
+    switch(current_token_type_parser){
+    case IDENTIFIER:
+        
+        const char *tmp;
+        token_get_string(current_token_parser, &tmp);
+        char *name = str_dup(tmp);
+        consume();
+        expect(SP_ARROW);
+        ast_node_t* value = parse_precedence(NULL);
+        ast_node_t* i = make_declaration_node(name,RETURN_INT,value);
+        if(symtable_scope_push(symtable) != 0) fail(MALLOC_FAIL); 
+        if(symtable_insert(symtable,i,false,true)) fail(REDEFINITION);
+        ast_node_t* end;
+        ast_node_t* by;
+        bool is_to;
+        parse_guards(&end,&by,&is_to);
+        expect(KW_DO);
+        ast_node_t *body = parse_for_body();
+       symtable_scope_pop(symtable);
+        ast_node_t* llist = init_llist(); //mozno doplnim jednoriadkove ifs
+        if(!llist) fail(MALLOC_FAIL);
+        ast_node_t* n = make_for_loop_node(i,end,by,is_to,llist,body);
+        if(!n) fail(MALLOC_FAIL);
+        return n;
+    case SP_EOL:
+        consume();
+        if(symtable_scope_push(symtable)) fail(MALLOC_FAIL);
+        ast_node_t *m = parse_indented_for();
+       symtable_scope_pop(symtable);
+        return m;
+    default:
+        fail(SYNTAX_ERROR);
+        return NULL;
+
+    }
+        
+}
+
+static ast_node_t* parse_for_body(void){
+    switch(current_token_type_parser){
+            case SP_EOL:
+                consume();
+                return parse_indented_block();
+               
+            case IDENTIFIER:
+            case SP_OPENING_PARENTHESIS:
+            case OP_MINUS:
+            case INTEGER:
+            case DOUBLE:
+            case STRING:
+            case OP_NOT:
+            case KW_TRUE:
+            case KW_FALSE:
+                ast_node_t *block = init_llist();
+                if(!block) fail(MALLOC_FAIL);
+                add_llist_item(block,parse_precedence(NULL));
+                parse_optional_eol();
+                return block;
+            default:
+                fail(SYNTAX_ERROR);
+                return NULL;
+        }
+}
+
+static ast_node_t* parse_body(void){
+        switch(current_token_type_parser){
+            case SP_EOL:
+                consume();
+                return parse_indented_block();
+                
+            case IDENTIFIER:
+            case SP_OPENING_PARENTHESIS:
+            case OP_MINUS:
+            case INTEGER:
+            case DOUBLE:
+            case STRING:
+            case OP_NOT:
+            case KW_TRUE:
+            case KW_FALSE:
+                ast_node_t *block = init_llist();
+                if(!block) fail(MALLOC_FAIL);
+                add_llist_item(block,parse_precedence(NULL));
+                parse_optional_eol();
+                return block;
+            default:
+                fail(SYNTAX_ERROR);
+                return NULL;
+        }
+}
+
+static ast_node_t* parse_else_if_or_else(bool is_expr,ast_node_t* elsifs){
+    switch(current_token_type_parser){
+        case KW_IF:
+            consume();
+            ast_node_t* cond = parse_precedence(NULL);
+            expect(KW_THEN);
+            ast_node_t *block = parse_body();
+            ast_node_t *elsif = make_else_if_node(cond,block);
+            if(!elsif) fail(MALLOC_FAIL);
+            add_llist_item(elsifs,elsif);
+            return parse_else_part(is_expr,elsifs);
+        case SP_EOL:
+        case IDENTIFIER:
+        case SP_OPENING_PARENTHESIS:
+        case OP_MINUS:
+        case INTEGER:
+        case DOUBLE:
+        case STRING:
+        case OP_NOT:
+        case KW_TRUE:
+        case KW_FALSE:
+            return parse_else_body(is_expr);
+            
+
+        default:
+            fail(SYNTAX_ERROR);
+            return NULL;
+    }
+}
+
+static ast_node_t* parse_else_part(bool is_expr, ast_node_t* elsifs){
+
+    if (current_token_type_parser == KW_ELSE){
+            consume();
+            return parse_else_if_or_else(is_expr,elsifs);
+    }
+    if(is_expr) fail(SYNTAX_ERROR); //chyba else
+    switch(current_token_type_parser){
+        case KW_VAL:
+        case KW_VAR:
+        case KW_IF:
+        case KW_WHILE:
+        case KW_RETURN:
+        case IDENTIFIER:
+        case SP_OPENING_PARENTHESIS:
+        case OP_MINUS:
+        case INTEGER:
+        case DOUBLE:
+        case STRING:
+        case OP_NOT:
+        case KW_TRUE:
+        case KW_FALSE:
+        case KW_FOR:
+        case SP_DEDENT:
+            return NULL;
+        default:
+            fail(SYNTAX_ERROR);
+            return NULL;
+    }
+}
+
 /**
  * @brief parses <IF> -> if <EXPR> then EOL <INDENTED_BLOCK> 
  * @return if else node with the condition and both blocks
  */
 
-static ast_node_t* parse_if(){
+ast_node_t* parse_if(bool is_expr){
     expect(KW_IF);
     ast_node_t* cond = parse_precedence(NULL);
     expect(KW_THEN);
-    expect(SP_EOL);
-    ast_node_t* if_block = parse_indented_block();
-    
-    expect(KW_ELSE);
-    expect(SP_EOL);
-    ast_node_t* else_block = parse_indented_block();
-   
-    //expect(SP_EOL);
-    return  make_if_else_tree(cond,if_block,else_block);
+    ast_node_t* if_block = parse_body();
+    ast_node_t* elsifs = init_llist();
+    if(!elsifs) fail(MALLOC_FAIL);
+    ast_node_t* else_block = parse_else_part(is_expr,elsifs);
+    ast_node_t* n = make_if_else_tree(cond,if_block,elsifs,else_block);
+    if(!n) fail(MALLOC_FAIL);
+    return  n;
 }
 
 /**
@@ -563,19 +897,23 @@ static ast_node_t* parse_id_expr_or_funcall(){
             expect(SP_EOL);
             return call;
         case OP_ASSIGN:
+    
             symbol_t *symbol = symtable_find(symtable,name);
             if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
             //im in assign cant be const
             if(symbol->is_const) fail(ASSIGN_TO_CONST);
             consume();
             ast_node_t* expr = parse_precedence(NULL);
-            ast_node_t* assigment_name = make_node(AST_LEAF,make_unique_name(name));
+            if(prev_token_type_parser != SP_DEDENT) expect(SP_EOL);
+            ast_node_t* assigment_name = make_node(AST_LEAF,symbol);
             free(name);
-            expect(SP_EOL);
+            //expect(SP_EOL);
             return make_binary_tree(AST_ASSIGNMENT,assigment_name,expr);
         case SP_EOL:
             expect(SP_EOL);
-            ast_node_t *n  = make_node(AST_LEAF,make_unique_name(name));
+            symbol_t* sym = symtable_find(symtable,name);
+            if(!sym) fail(USING_NOT_DEFINED_VARIABLE);
+            ast_node_t *n  = make_node(AST_LEAF,sym);
             free(name);
             return n;
             
@@ -590,6 +928,8 @@ static ast_node_t* parse_id_expr_or_funcall(){
         case OP_GREATER_OR_EQUAL:
         case OP_EQUAL:
         case OP_NOT_EQUAL:
+        case OP_AND:
+        case OP_OR:
             ast_node_t *expr2 = parse_precedence(name);
             expect(SP_EOL);
             return expr2;
@@ -622,9 +962,12 @@ static ast_node_t* parse_line(){
         case KW_RETURN:
             return parse_return();
         case KW_IF:
-           return  parse_if();
+           return  parse_if(false);
         case KW_WHILE:
             return parse_while();
+        case KW_FOR:
+            consume();
+            return parse_for();
         case IDENTIFIER:
             
             return parse_id_expr_or_funcall();
@@ -633,6 +976,9 @@ static ast_node_t* parse_line(){
         case INTEGER:  
         case DOUBLE: 
         case STRING:
+        case OP_NOT:
+        case KW_TRUE:
+        case KW_FALSE:
             ast_node_t * line = parse_precedence(NULL);
             expect(SP_EOL);
             return line;
@@ -663,7 +1009,11 @@ static ast_node_t* parse_rest_block(ast_node_t* block){
             current_token_type_parser == OP_MINUS ||
             current_token_type_parser == INTEGER ||
             current_token_type_parser == DOUBLE ||
-            current_token_type_parser == STRING){
+            current_token_type_parser == STRING ||
+            current_token_type_parser == OP_NOT ||
+            current_token_type_parser == KW_TRUE ||
+            current_token_type_parser == KW_FALSE ||
+            current_token_type_parser == KW_FOR){ 
                 add_llist_item(block,parse_line());
                 parse_rest_block(block);
                 return block;

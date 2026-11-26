@@ -63,9 +63,9 @@ void expect(token_type_t token);
 // just passing tokens into precedence parser
 extern token_t* current_token_parser;
 extern token_type_t current_token_type_parser;
+extern token_type_t prev_token_type_parser;
 
-
-
+ast_node_t* parse_if(bool is_expr);
 
 /**
  * @brief copies a string allocated memory exits with 99 if malloc fails, same thing as a strdup from c library

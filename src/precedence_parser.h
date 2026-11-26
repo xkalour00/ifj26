@@ -10,6 +10,8 @@
 #define PARSER_PRECEDENCE_H
 
 #include "ast.h"
+#include "symtable.h"
+
 
 /**
  * @brief parses an expression using the precedence table
