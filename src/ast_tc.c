@@ -15,8 +15,11 @@
 #include "symtable.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void print_error(const char *str) { fprintf(stderr, "error: %s\n", str); }
 
 /**
  * @brief Check particular function for recursiveness
@@ -29,34 +32,40 @@
  */
 int check_for_recursion(ast_node_t *node, hashtable_t *ht, symtable_t *sym,
                         bool checked_func) {
-  size_t idx = 0;
   stack_t *stack = node->data.func_def.dir_reach_funcs;
-  char *func_name = stack_get(stack, idx++);
+  char **func_name = NULL;
 
-  while (func_name) {
+  for (size_t idx = 0; (func_name = stack_get(stack, idx)) != NULL; idx++) {
     // val is not to be used
     void *val;
-    int ret = hashtable_find(ht, func_name, &val);
-    symbol_t *symbol = symtable_find(sym, func_name);
+    int ret = hashtable_find(ht, *func_name, &val);
+    symbol_t *symbol = symtable_find(sym, *func_name);
 
     if (!symbol) {
       // Symbol not found
       return -1;
     }
+    if (!symbol->is_function || !symbol->declaration) {
+      // If for some reason searching function name returned
+      // variable declaration or the function declaration is NULL
+      return -1;
+    }
+
     if (ret == 0) {
       // Function found
-      break;
+      continue;
     } else if (ret == 1) {
       // Function not found
-      hashtable_insert(ht, func_name, NULL);
-      check_for_recursion(symbol->declaration, ht, sym, false);
+      if (hashtable_insert(ht, *func_name, NULL)) {
+        return -1;
+      }
+      if (check_for_recursion(symbol->declaration, ht, sym, false)) {
+        return -1;
+      }
     } else {
       // Hashtable lookup error
       return -1;
     }
-
-    // Get next func_name in stack
-    func_name = stack_get(stack, idx++);
   }
 
   if (!checked_func) {
@@ -106,7 +115,9 @@ int set_recursion_flags(ast_node_t *root, symtable_t *symtable) {
       return -1;
     }
 
-    check_for_recursion(func, reachable_funcs, symtable, true);
+    if (check_for_recursion(func, reachable_funcs, symtable, true)) {
+      return -1;
+    }
 
     hashtable_free(reachable_funcs);
 
@@ -139,15 +150,9 @@ int push_if_not_present(stack_t *stack, char *str) {
     str_stack = stack_get(stack, idx++);
   }
 
-  char *str_malloced = malloc(sizeof(char) * (strlen(str) + 1));
-
-  if (!str_malloced) {
+  if (stack_push(stack, &str)) {
     return -1;
   }
-
-  strcpy(str_malloced, str);
-
-  stack_push(stack, str_malloced);
 
   return 0;
 } // int push_if_not_present(stack_t *stack, char *str)
@@ -160,29 +165,46 @@ int push_if_not_present(stack_t *stack, char *str) {
  * @param right
  * @return int
  */
-int figure_implicit_conv(ast_node_t *parent, ast_node_t *left,
-                         ast_node_t *right) {
+int figure_implicit_conv(ast_node_t *parent, ast_binary_class_t class,
+                         ast_node_t *left, ast_node_t *right) {
   return_type_t left_type = left->ret_type;
-  return_type_t right_type = left->ret_type;
+  return_type_t right_type = right->ret_type;
+
+  return_type_t res_type = RETURN_UNKNOWN;
 
   if (left_type == RETURN_INT && right_type == RETURN_DOUBLE) {
     // Implicit conversion occurrs in left node
-    left->data.integer.to_double = true;
-    parent->ret_type = RETURN_DOUBLE;
+    left->to_double = true;
+    res_type = RETURN_DOUBLE;
   } else if (left_type == RETURN_DOUBLE && right_type == RETURN_INT) {
     // Implicit conversion occurrs in right node
-    right->data.integer.to_double = true;
-    parent->ret_type = RETURN_DOUBLE;
+    right->to_double = true;
+    res_type = RETURN_DOUBLE;
   } else if (left_type == RETURN_INT && right_type == RETURN_INT) {
     // Parent node receives the same type
-    parent->ret_type = RETURN_INT;
+    res_type = RETURN_INT;
   } else if (left_type == RETURN_DOUBLE && right_type == RETURN_DOUBLE) {
-    parent->ret_type = RETURN_DOUBLE;
+    res_type = RETURN_DOUBLE;
   } else if (left_type == RETURN_STRING && right_type == RETURN_STRING) {
-    parent->ret_type = RETURN_STRING;
+    if (parent->data.binary.binary_type != AST_ADDITION &&
+        class == AST_BIN_ARITH) {
+      print_error("cannot perform arithmetic operations on type string "
+                  "(besides operator plus)");
+      return -1;
+    }
+    res_type = RETURN_STRING;
   } else {
-    // TODO: print error
+    print_error("cannot cast operators to single type (implicit type "
+                "conversion error)");
     return -1;
+  }
+
+  // Since implicit conversion check is performed for AST_BIN_ARITH and
+  // AST_BIN_LOGIC, we must set type accordingly
+  if (class == AST_BIN_ARITH) {
+    parent->ret_type = res_type;
+  } else {
+    parent->ret_type = RETURN_BOOLEAN;
   }
 
   return 0;
@@ -210,12 +232,26 @@ int walk_binary(ast_node_t *parent, ast_node_t *node, symtable_t *symtable) {
 
   switch (class) {
   case AST_BIN_ARITH:
-    return figure_implicit_conv(node, left_node, right_node);
-    break;
   case AST_BIN_LOGIC:
-    // TODO: logic should be boolean ret_type or something
+    if (figure_implicit_conv(node, class, left_node, right_node)) {
+      // Implicit conversion error
+      return -1;
+    }
     break;
   case AST_BIN_ASSIGN:
+    if (left_node->type != AST_LEAF) {
+      print_error("cannot assign to rvalue");
+      return -1;
+    } else if (left_node->data.leaf->is_const) {
+      print_error("cannot change value of a constant");
+      return -1;
+    } else if (left_node->ret_type == RETURN_DOUBLE &&
+               right_node->ret_type == RETURN_INT) {
+      right_node->to_double = true;
+    } else if (left_node->ret_type != right_node->ret_type) {
+      print_error("assignment of differing type");
+      return -1;
+    }
     node->ret_type = RETURN_UNIT;
     break;
   }
@@ -233,12 +269,19 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
   case AST_DOUBLE:
   case AST_STRING:
   case AST_UNIT:
-    // Type was already set when the node was
-    // created
+    // Type was already set when the node was created
     break;
   case AST_LEAF:
-    line->ret_type =
-        line->data.leaf->declaration->data.declaration.value->ret_type;
+    if (!line->data.leaf->declaration->data.declaration.value) {
+      // This happens in function definitions, parameters
+      // are defined as definitions with .value == NULL
+      return 0;
+    }
+    if (line->data.leaf->is_function) {
+      // I don't think this should happen
+      return -1;
+    }
+    line->ret_type = line->data.leaf->declaration->data.declaration.return_type;
     break;
   case AST_BINARY:
     return walk_binary(parent, line, symtable);
@@ -254,6 +297,10 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     if (walk_tree(parent, line->data.while_statement.condition, symtable)) {
       return -1;
     }
+    if (line->data.while_statement.condition->ret_type != RETURN_BOOLEAN) {
+      print_error("condition must have a boolean value");
+      return -1;
+    }
     if (walk_tree(parent, line->data.while_statement.while_block, symtable)) {
       return -1;
     }
@@ -261,6 +308,10 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     break;
   case AST_IF_STATEMENT:
     if (walk_tree(parent, line->data.if_statement.condition, symtable)) {
+      return -1;
+    }
+    if (line->data.if_statement.condition->ret_type != RETURN_BOOLEAN) {
+      print_error("condition must have a boolean value");
       return -1;
     }
     if (walk_tree(parent, line->data.if_statement.if_block, symtable)) {
@@ -274,22 +325,26 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     // other type than Unit
     break;
   case AST_FUNC_DEF:
+    // This is to prevent recursive functions from getting called repeatedly
+    if (line->data.func_def.function_walked) {
+      return 0;
+    }
+    line->data.func_def.function_walked = true;
+
+    // Order parameters -> tree_list is important
+    if (walk_tree(line, line->data.func_def.parameters, symtable)) {
+      return -1;
+    }
     if (walk_tree(line, line->data.func_def.tree_list, symtable)) {
       return -1;
     }
-    // TODO: if return was unspecified
+    if (!line->data.func_def.has_return_node &&
+        line->data.func_def.return_type == RETURN_UNKNOWN) {
+      ast_node_t *llist = line->data.func_def.tree_list;
+      line->ret_type = llist->data.llist.end->ret_type;
+    }
     break;
   case AST_FUNC_CALL:
-    if (parent->data.func_def.first_walk) {
-      // Only try to insert the name if we know we're
-      // walking the function for the first time
-      if (push_if_not_present(parent->data.func_def.dir_reach_funcs,
-                              line->data.func_call.name)) {
-        return -1;
-      }
-      return 0;
-    }
-
     if (walk_tree(parent, line->data.func_call.parameters, symtable)) {
       return -1;
     }
@@ -301,42 +356,109 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
       return -1;
     }
     // TODO: we must check for type consistency
-    // in parameters, throw error or set implicit
+    // in parameters (and count of them!), throw error or set implicit
     // type conversion
     // TODO: must check for return type of
     // func_call's func_def. if set, set it to
     // that value, if not, call walk_tree on the
     // func_def
+    line->ret_type = sym->declaration->ret_type;
     break;
   case AST_ROOT:
     return walk_tree(NULL, line->data.root.func_def_list, symtable);
   case AST_RETURN:
-    // Push line to function's stack of return nodes
-    if (parent->data.func_def.first_walk) {
-      // Presence of at least one return node raises the flag
-      parent->data.func_def.has_return_node = true;
-      if (stack_push(parent->data.func_def.return_nodes, line)) {
-        return -1;
-      }
-      return 0;
+    if (walk_tree(parent, line->data.return_node.value, symtable)) {
+      return -1;
     }
-
-    // TODO: We must check that all returns in
-    // function are of the same type (does not
-    // matter if function's return type is
-    // inferred or explicitly stated) If
-    // return_node.value == NULL then ret_type is
-    // Unit
-
-    return walk_tree(parent, line->data.return_node.value, symtable);
+    if (!line->data.return_node.value) {
+      line->ret_type = RETURN_UNIT;
+      break;
+    } else {
+      line->ret_type = line->data.return_node.value->ret_type;
+    }
+    break;
   case AST_DECLARATION:
     if (walk_tree(parent, line->data.declaration.value, symtable)) {
       return -1;
     }
+    return_type_t dec_ret = line->data.declaration.return_type;
+    return_type_t val_ret;
+    if (!line->data.declaration.value) {
+      val_ret = line->data.declaration.value->ret_type;
+    } else {
+      val_ret = line->data.declaration.return_type;
+    }
+    if (dec_ret == RETURN_UNKNOWN) {
+      // Type inference
+      line->data.declaration.return_type = val_ret;
+    } else if (val_ret == RETURN_INT && dec_ret == RETURN_DOUBLE) {
+      // Implicit type conversion
+      line->data.declaration.value->to_double = true;
+    } else if (dec_ret != val_ret) {
+      print_error("assignment of differing type");
+      return -1;
+    }
+    // Declaration line itself is of type Unit as is defined in specification
     line->ret_type = RETURN_UNIT;
     break;
   default:
     return -1;
+  }
+
+  return 0;
+} // int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable)
+
+int walk_tree_meta(ast_node_t *parent, ast_node_t *line) {
+  if (!line) {
+    return 0;
+  }
+
+  switch (line->type) {
+  case AST_INTEGER:
+  case AST_DOUBLE:
+  case AST_STRING:
+  case AST_UNIT:
+  case AST_LEAF:
+    break;
+  case AST_BINARY:
+    walk_tree_meta(parent, line->data.binary.left);
+    walk_tree_meta(parent, line->data.binary.right);
+    break;
+  case AST_LINKED_LIST:
+    walk_tree_meta(parent, line->data.llist.begin);
+    break;
+  case AST_LINKED_LIST_ITEM:
+    walk_tree_meta(parent, line->data.llist_item.node);
+    walk_tree_meta(parent, line->data.llist_item.next);
+    break;
+  case AST_WHILE_LOOP:
+    walk_tree_meta(parent, line->data.while_statement.condition);
+    walk_tree_meta(parent, line->data.while_statement.while_block);
+    break;
+  case AST_IF_STATEMENT:
+    walk_tree_meta(parent, line->data.if_statement.condition);
+    walk_tree_meta(parent, line->data.if_statement.if_block);
+    walk_tree_meta(parent, line->data.if_statement.else_block);
+    break;
+  case AST_FUNC_DEF:
+    walk_tree_meta(line, line->data.func_def.tree_list);
+    break;
+  case AST_FUNC_CALL:
+    walk_tree_meta(parent, line->data.func_call.parameters);
+    return push_if_not_present(parent->data.func_def.dir_reach_funcs,
+                               line->data.func_call.name);
+    break;
+  case AST_ROOT:
+    walk_tree_meta(NULL, line->data.root.func_def_list);
+    break;
+  case AST_RETURN:
+    parent->data.func_def.has_return_node = true;
+    walk_tree_meta(parent, line->data.return_node.value);
+    return stack_push(parent->data.func_def.return_nodes, &line);
+    break;
+  case AST_DECLARATION:
+    walk_tree_meta(parent, line->data.declaration.value);
+    break;
   }
 
   return 0;
@@ -369,14 +491,14 @@ int check_func_ret_type_validity(ast_node_t *root) {
     // Function must have explicitly stated return value if the function is
     // either directly or indirectly recursive or the function has at least
     // one return node
-    if ((is_recursive || has_return_node) && has_ret_unknown) {
-      // TODO: print type error
+    if (is_recursive && has_ret_unknown) {
+      print_error("recursive functions must have explicit return types");
       return -1;
     }
-
-    if (true) {
-      // TODO: check all return nodes that they are of the same type and that
-      // they match return type
+    if (has_return_node && has_ret_unknown) {
+      print_error(
+          "functions with return statements must have explicit return type");
+      return -1;
     }
 
     func_item = func_item->data.llist_item.next;
@@ -386,20 +508,25 @@ int check_func_ret_type_validity(ast_node_t *root) {
 } // int check_func_ret_type_validity(ast_node_t *root)
 
 int check_ast(ast_node_t *root, symtable_t *symtable) {
+  if (!root || !symtable) {
+    return -1;
+  }
+
   // If tree has no main function
   if (!root->data.root.main_func) {
+    print_error("program has no main function");
     return -1;
   }
   // Check whether functions have valid return types should they be recursive
   if (set_recursion_flags(root, symtable)) {
     return -1;
   }
-  // Assign return values to expressions
-  if (walk_tree(NULL, root, symtable)) {
-    return -1;
-  }
   // Check if functions have valid return types
   if (check_func_ret_type_validity(root)) {
+    return -1;
+  }
+  // Assign return values to expressions
+  if (walk_tree(NULL, root, symtable)) {
     return -1;
   }
 

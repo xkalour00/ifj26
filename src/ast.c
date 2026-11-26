@@ -25,6 +25,7 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
 
   node->type = type;
   node->ret_type = RETURN_UNKNOWN;
+  node->to_double = false;
 
   switch (type) {
   case AST_UNIT:
@@ -35,8 +36,7 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
     break;
   case AST_INTEGER:
     node->ret_type = RETURN_INT;
-    node->data.integer.value = *(int64_t *)data;
-    node->data.integer.to_double = false;
+    node->data.integer = *(int64_t *)data;
     break;
   case AST_DOUBLE:
     node->ret_type = RETURN_DOUBLE;
@@ -75,6 +75,7 @@ ast_node_t *make_root_node() {
   node->ret_type = RETURN_UNKNOWN;
   node->data.root.main_func = NULL;
   node->data.root.func_def_list = func_llist;
+  node->to_double = false;
 
   return node;
 }
@@ -92,6 +93,7 @@ ast_node_t *make_binary_tree(ast_binary_type_t bin_op, ast_node_t *left,
   node->data.binary.binary_type = bin_op;
   node->data.binary.left = left;
   node->data.binary.right = right;
+  node->to_double = false;
 
   // Assign binary class depending on the exact type
   switch (bin_op) {
@@ -130,6 +132,7 @@ ast_node_t *make_if_else_tree(ast_node_t *cond, ast_node_t *if_block,
   node->data.if_statement.condition = cond;
   node->data.if_statement.if_block = if_block;
   node->data.if_statement.else_block = else_block;
+  node->to_double = false;
 
   return node;
 }
@@ -145,6 +148,7 @@ ast_node_t *make_while_tree(ast_node_t *cond, ast_node_t *while_block) {
   node->ret_type = RETURN_UNKNOWN;
   node->data.while_statement.condition = cond;
   node->data.while_statement.while_block = while_block;
+  node->to_double = false;
 
   return node;
 }
@@ -160,6 +164,7 @@ ast_node_t *init_llist() {
   node->ret_type = RETURN_UNKNOWN;
   node->data.llist.begin = NULL;
   node->data.llist.end = NULL;
+  node->to_double = false;
 
   return node;
 }
@@ -175,6 +180,7 @@ int add_llist_item(ast_node_t *llist, ast_node_t *item) {
   node->ret_type = RETURN_UNKNOWN;
   node->data.llist_item.node = item;
   node->data.llist_item.next = NULL;
+  node->to_double = false;
 
   // If llist is empty
   if (!llist->data.llist.begin) {
@@ -201,6 +207,7 @@ ast_node_t *make_func_call_tree(char *func_name, ast_node_t *params) {
   node->ret_type = RETURN_UNKNOWN;
   node->data.func_call.parameters = params;
   node->data.func_call.name = func_name;
+  node->to_double = false;
 
   return node;
 }
@@ -214,20 +221,6 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
     return -1;
   }
 
-  ast_node_t *body_end = body->data.llist.end;
-  ast_node_t *last_line = body_end->data.llist_item.node;
-
-  // If last line was not set to AST_RETURN, set it that way
-  if (last_line->type != AST_RETURN) {
-    ast_node_t *ret = make_node(AST_RETURN, last_line);
-    if (!ret) {
-      free(node);
-      return -1;
-    }
-
-    body_end->data.llist_item.node = ret;
-  }
-
   node->type = AST_FUNC_DEF;
   node->ret_type = RETURN_UNKNOWN;
   node->data.func_def.return_type = return_type;
@@ -235,36 +228,31 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   node->data.func_def.has_return_node = false;
   stack_t **dr_funcs = &(node->data.func_def.dir_reach_funcs);
   stack_t **ret_nodes = &(node->data.func_def.return_nodes);
-  node->data.func_def.first_walk = true;
   node->data.func_def.name = func_name;
   node->data.func_def.parameters = params;
   node->data.func_def.tree_list = body;
+  node->to_double = false;
+  node->data.func_def.function_walked = false;
 
   // Initialize stack that holds dynamically allocated strings
   if (stack_init(dr_funcs, sizeof(char *))) {
+    free(func_name);
     free(node);
     return -1;
   }
 
   if (stack_init(ret_nodes, sizeof(ast_node_t *))) {
     stack_free(*dr_funcs);
+    free(func_name);
     free(node);
     return -1;
   }
 
-  if (walk_tree(NULL, node, NULL)) {
+  if (walk_tree_meta(NULL, node)) {
     stack_free(*dr_funcs);
     stack_free(*ret_nodes);
+    free(func_name);
     free(node);
-    return -1;
-  }
-
-  node->data.func_def.first_walk = false;
-
-  ast_node_t *llist = root_node->data.root.func_def_list;
-
-  if (add_llist_item(llist, node)) {
-    free_tree(node);
     return -1;
   }
 
@@ -274,6 +262,21 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   }
   // If function is main and main is already assigned
   else if (is_main && root_node->data.root.main_func) {
+    stack_free(*dr_funcs);
+    stack_free(*ret_nodes);
+    free(func_name);
+    free(node);
+    return -1;
+  }
+
+  ast_node_t *llist = root_node->data.root.func_def_list;
+
+  if (add_llist_item(llist, node)) {
+    root_node->data.root.main_func = NULL;
+    stack_free(*dr_funcs);
+    stack_free(*ret_nodes);
+    free(func_name);
+    free(node);
     return -1;
   }
 
@@ -295,6 +298,7 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
   node->data.declaration.name = name;
   node->data.declaration.return_type = return_type;
   node->data.declaration.value = value;
+  node->to_double = false;
 
   return node;
 }
@@ -308,11 +312,8 @@ void free_tree(ast_node_t *root) {
 
   switch (root->type) {
   case AST_INTEGER:
-    break;
   case AST_DOUBLE:
-    break;
   case AST_LEAF:
-    free(root->data.leaf);
     break;
   case AST_STRING:
     free(root->data.str);
@@ -345,6 +346,7 @@ void free_tree(ast_node_t *root) {
   case AST_FUNC_DEF:
     free(root->data.func_def.name);
     stack_free(root->data.func_def.dir_reach_funcs);
+    stack_free(root->data.func_def.return_nodes);
     free_tree(root->data.func_def.tree_list);
     free_tree(root->data.func_def.parameters);
     break;

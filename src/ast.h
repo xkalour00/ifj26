@@ -66,6 +66,7 @@ typedef enum {
   RETURN_INT,
   RETURN_STRING,
   RETURN_UNIT,
+  RETURN_BOOLEAN,
   RETURN_UNKNOWN, // For TC, all significant returns must be known at codegen
 } return_type_t;
 
@@ -76,15 +77,13 @@ typedef enum {
 typedef struct node {
   ast_node_type_t type;
   return_type_t ret_type;
+  bool to_double; // This is only to be used when node has ret_type RETURN_INT
 
   union {
     double fp;
     symbol_t *leaf;
     char *str;
-    struct {
-      int64_t value;
-      bool to_double;
-    } integer;
+    int64_t integer;
     struct {
       ast_binary_class_t binary_class;
       ast_binary_type_t binary_type;
@@ -115,11 +114,11 @@ typedef struct node {
       struct node *tree_list;
       char *name;
       // Helper params for TC
-      bool first_walk;          // True if the function is yet to be traversed
       bool possible_recursion;  // True if function can be recursive
       bool has_return_node;     // True if function has at least one return node
       stack_t *return_nodes;    // All return node the function contains
       stack_t *dir_reach_funcs; // Function names the function can directly call
+      bool function_walked;
     } func_def;
     struct {
       struct node *parameters; // Expected to be a linked list
