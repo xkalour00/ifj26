@@ -60,6 +60,8 @@ typedef enum token_type {
   OP_NOT,
   OP_AND,
   OP_OR,
+  // control symbols:
+  SP_ARROW,
   // special symbols:
   SP_INDENT,
   SP_DEDENT,

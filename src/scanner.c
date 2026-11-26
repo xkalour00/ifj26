@@ -412,6 +412,8 @@ int get_next_token(token_t **token) {
     case S_LESS_OR_EQUAL:
       if (c == '=') {
         return return_token(token, OP_LESS_OR_EQUAL);
+      } else if (c == '-') {
+        return return_token(token, SP_ARROW);
       } else {
         ungetc(c, stdin);
         return return_token(token, OP_LESS);
