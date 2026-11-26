@@ -4,7 +4,7 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Implementation of an abstract syntax tree
  *
- * @date 2026-11-21
+ * @date 2026-11-26
  */
 
 #include "ast.h"
@@ -24,21 +24,26 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
   }
 
   node->type = type;
+  node->ret_type = RETURN_UNKNOWN;
 
   switch (type) {
   case AST_UNIT:
+    node->ret_type = RETURN_UNIT;
     break;
   case AST_LEAF:
     node->data.leaf = data;
     break;
   case AST_INTEGER:
+    node->ret_type = RETURN_INT;
     node->data.integer.value = *(int64_t *)data;
     node->data.integer.to_double = false;
     break;
   case AST_DOUBLE:
+    node->ret_type = RETURN_DOUBLE;
     node->data.fp = *(double *)data;
     break;
   case AST_STRING:
+    node->ret_type = RETURN_STRING;
     node->data.str = data;
     break;
   case AST_RETURN:
@@ -67,6 +72,7 @@ ast_node_t *make_root_node() {
   }
 
   node->type = AST_ROOT;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.root.main_func = NULL;
   node->data.root.func_def_list = func_llist;
 
@@ -82,9 +88,31 @@ ast_node_t *make_binary_tree(ast_binary_type_t bin_op, ast_node_t *left,
   }
 
   node->type = AST_BINARY;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.binary.binary_type = bin_op;
   node->data.binary.left = left;
   node->data.binary.right = right;
+
+  // Assign binary class depending on the exact type
+  switch (bin_op) {
+  case AST_ADDITION:
+  case AST_SUBTRACTION:
+  case AST_MULTIPLICATION:
+  case AST_DIVISION:
+    node->data.binary.binary_class = AST_BIN_ARITH;
+    break;
+  case AST_ASSIGNMENT:
+    node->data.binary.binary_class = AST_BIN_ASSIGN;
+    break;
+  case AST_EQUAL:
+  case AST_NEQUAL:
+  case AST_LEQUAL:
+  case AST_GEQUAL:
+  case AST_LESS:
+  case AST_GREATER:
+    node->data.binary.binary_class = AST_BIN_LOGIC;
+    break;
+  }
 
   return node;
 }
@@ -98,6 +126,7 @@ ast_node_t *make_if_else_tree(ast_node_t *cond, ast_node_t *if_block,
   }
 
   node->type = AST_IF_STATEMENT;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.if_statement.condition = cond;
   node->data.if_statement.if_block = if_block;
   node->data.if_statement.else_block = else_block;
@@ -113,6 +142,7 @@ ast_node_t *make_while_tree(ast_node_t *cond, ast_node_t *while_block) {
   }
 
   node->type = AST_WHILE_LOOP;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.while_statement.condition = cond;
   node->data.while_statement.while_block = while_block;
 
@@ -127,6 +157,7 @@ ast_node_t *init_llist() {
   }
 
   node->type = AST_LINKED_LIST;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.llist.begin = NULL;
   node->data.llist.end = NULL;
 
@@ -141,6 +172,7 @@ int add_llist_item(ast_node_t *llist, ast_node_t *item) {
   }
 
   node->type = AST_LINKED_LIST_ITEM;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.llist_item.node = item;
   node->data.llist_item.next = NULL;
 
@@ -166,6 +198,7 @@ ast_node_t *make_func_call_tree(char *func_name, ast_node_t *params) {
   }
 
   node->type = AST_FUNC_CALL;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.func_call.parameters = params;
   node->data.func_call.name = func_name;
 
@@ -196,11 +229,13 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   }
 
   node->type = AST_FUNC_DEF;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.func_def.return_type = return_type;
   node->data.func_def.possible_recursion = false;
   node->data.func_def.has_return_node = false;
-  bool *ret_node_flag = &(node->data.func_def.has_return_node);
   stack_t **dr_funcs = &(node->data.func_def.dir_reach_funcs);
+  stack_t **ret_nodes = &(node->data.func_def.return_nodes);
+  node->data.func_def.first_walk = true;
   node->data.func_def.name = func_name;
   node->data.func_def.parameters = params;
   node->data.func_def.tree_list = body;
@@ -211,19 +246,35 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
     return -1;
   }
 
-  // And fill the stack with function names that are called in its body
-  search_for_dr_funcs_return(*dr_funcs, ret_node_flag, body);
+  if (stack_init(ret_nodes, sizeof(ast_node_t *))) {
+    stack_free(*dr_funcs);
+    free(node);
+    return -1;
+  }
+
+  if (walk_tree(NULL, node, NULL)) {
+    stack_free(*dr_funcs);
+    stack_free(*ret_nodes);
+    free(node);
+    return -1;
+  }
+
+  node->data.func_def.first_walk = false;
 
   ast_node_t *llist = root_node->data.root.func_def_list;
-  int append_result = add_llist_item(llist, node);
 
-  if (append_result) {
+  if (add_llist_item(llist, node)) {
     free_tree(node);
     return -1;
   }
 
-  if (is_main) {
+  // If function is main and no main was made before
+  if (is_main && !root_node->data.root.main_func) {
     root_node->data.root.main_func = node;
+  }
+  // If function is main and main is already assigned
+  else if (is_main && root_node->data.root.main_func) {
+    return -1;
   }
 
   return 0;
@@ -240,6 +291,7 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
   }
 
   node->type = AST_DECLARATION;
+  node->ret_type = RETURN_UNKNOWN;
   node->data.declaration.name = name;
   node->data.declaration.return_type = return_type;
   node->data.declaration.value = value;

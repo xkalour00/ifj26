@@ -4,13 +4,14 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Abstract Syntax Tree interface header
  *
- * @date 2026-11-21
+ * @date 2026-11-26
  */
 
 #ifndef AST_H
 #define AST_H
 
 #include "stack.h"
+#include "symtable.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -54,12 +55,18 @@ typedef enum {
 } ast_binary_type_t;
 
 typedef enum {
+  AST_BIN_ARITH,
+  AST_BIN_LOGIC,
+  AST_BIN_ASSIGN,
+} ast_binary_class_t;
+
+typedef enum {
   RETURN_NONE,
   RETURN_DOUBLE,
   RETURN_INT,
   RETURN_STRING,
   RETURN_UNIT,
-  RETURN_UNKNOWN, // For type checking, all returns must be known at codegen
+  RETURN_UNKNOWN, // For TC, all significant returns must be known at codegen
 } return_type_t;
 
 /**
@@ -68,16 +75,18 @@ typedef enum {
  */
 typedef struct node {
   ast_node_type_t type;
+  return_type_t ret_type;
 
   union {
     double fp;
-    char *leaf; // Under what name we should search symtable
+    symbol_t *leaf;
     char *str;
     struct {
       int64_t value;
       bool to_double;
     } integer;
     struct {
+      ast_binary_class_t binary_class;
       ast_binary_type_t binary_type;
       struct node *left;
       struct node *right;
@@ -100,16 +109,17 @@ typedef struct node {
       struct node *else_block;
     } if_statement;
     struct {
+      // Set by parser
       return_type_t return_type;
-      // Pre-typecheck variable, if true, return_type must NOT be RETURN_UNKNOWN
-      bool possible_recursion;
-      // Pre-typecheck variable, if true, return_type must NOT be RETURN_UNKNOWN
-      bool has_return_node;
-      // Pre-typecheck variable, directly reachable functions from this function
-      stack_t *dir_reach_funcs;
       struct node *parameters;
       struct node *tree_list;
       char *name;
+      // Helper params for TC
+      bool first_walk;          // True if the function is yet to be traversed
+      bool possible_recursion;  // True if function can be recursive
+      bool has_return_node;     // True if function has at least one return node
+      stack_t *return_nodes;    // All return node the function contains
+      stack_t *dir_reach_funcs; // Function names the function can directly call
     } func_def;
     struct {
       struct node *parameters; // Expected to be a linked list
@@ -242,14 +252,5 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
  * root node itself)
  */
 void free_tree(ast_node_t *root);
-
-/**
- * @brief Perform type checking on whole AST
- *
- * @param root Root node of the AST
- * @param symtable Pointer to symbol table
- * @return int Return code; 0 on success, non-zero on failure
- */
-int check_type_validity(ast_node_t *root, void *symtable);
 
 #endif // #ifndef AST_H
