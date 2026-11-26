@@ -9,8 +9,9 @@
 #ifndef SYMTABLE_H
 #define SYMTABLE_H
 
-#include "ast.h"
 #include "hashtable.h"
+
+typedef struct node ast_node_t;
 
 typedef struct {
   bool is_function;
