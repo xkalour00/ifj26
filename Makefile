@@ -31,3 +31,5 @@ check: pack
 
 pack:
 	zip -r $(LOGIN).zip Makefile dokumentace.pdf rozdeleni rozsireni $(SRC_FILES) $(HEADER_FILES)
+
+	rm -rf $(BUILD_PATH)*
