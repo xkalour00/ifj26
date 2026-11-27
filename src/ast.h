@@ -4,7 +4,7 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Abstract Syntax Tree interface header
  *
- * @date 2026-11-26
+ * @date 2026-11-27
  */
 
 #ifndef AST_H
@@ -28,7 +28,9 @@ typedef enum {
   AST_LINKED_LIST,
   AST_LINKED_LIST_ITEM,
   AST_WHILE_LOOP,
+  AST_FOR_LOOP,
   AST_IF_STATEMENT,
+  AST_ELSE_IF,
   AST_FUNC_DEF,
   AST_FUNC_CALL,
   AST_ROOT,
@@ -52,6 +54,9 @@ typedef enum {
   AST_GEQUAL,
   AST_LESS,
   AST_GREATER,
+  AST_NOT,
+  AST_AND,
+  AST_OR,
 } ast_binary_type_t;
 
 typedef enum {
@@ -84,6 +89,7 @@ typedef struct node {
     symbol_t *leaf;
     char *str;
     int64_t integer;
+    bool bool_value;
     struct {
       ast_binary_class_t binary_class;
       ast_binary_type_t binary_type;
@@ -103,10 +109,23 @@ typedef struct node {
       struct node *while_block;
     } while_statement;
     struct {
+      struct node *gen_start;
+      struct node *gen_end;
+      struct node *gen_step; // could be NULL
+      bool gen_is_to;
+      struct node *llist_guards;
+      struct node *code_block;
+    } for_loop;
+    struct {
       struct node *condition;
       struct node *if_block;
       struct node *else_block;
+      struct node *llist_else_if;
     } if_statement;
+    struct {
+      struct node *else_if_block;
+      struct node *cond;
+    } else_if;
     struct {
       // Set by parser
       return_type_t return_type;
@@ -134,6 +153,7 @@ typedef struct node {
     struct {
       struct node *value;
       char *name;
+      char *codegen_name;
       return_type_t return_type;
     } declaration;
   } data;     // union
@@ -175,12 +195,13 @@ ast_node_t *make_binary_tree(ast_binary_type_t bin_op, ast_node_t *left,
  * @param cond Node defining condition for this statement
  * @param if_block List of trees executed if condition is satisfied;
  * LINKED_LIST is expected here
+ * @param elsifs Linked list of ELSE_IFs
  * @param else_block List of trees executed should not condition be satisfied;
  * LINKED_LIST is expected here
  * @return ast_node_t* Pointer to created if-else statement
  */
 ast_node_t *make_if_else_tree(ast_node_t *cond, ast_node_t *if_block,
-                              ast_node_t *else_block);
+                              ast_node_t *elsifs, ast_node_t *else_block);
 
 /**
  * @brief Create a node representing while loop
@@ -243,6 +264,31 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
  */
 ast_node_t *make_declaration_node(char *name, return_type_t return_type,
                                   ast_node_t *value);
+
+/**
+ * @brief Create else-if statement (for linking multiple ifs)
+ *
+ * @param cond Condition
+ * @param block List of nodes that are executed
+ * @return ast_node_t* Pointer to created node
+ */
+ast_node_t *make_else_if_node(ast_node_t *cond, ast_node_t *block);
+
+/**
+ * @brief Create for loop node
+ *
+ * @param i_node Index declaration node
+ * @param end Maximum value of generator
+ * @param step Optional parameter; defines by how much to increment index
+ * @param is_to If true, generator goes to the end including;
+ * else is "until" (omits last value)
+ * @param llguards Linked list of guards
+ * @param block Linked list of lines inside the loop
+ * @return ast_node_t* Pointer to created node
+ */
+ast_node_t *make_for_loop_node(ast_node_t *i_node, ast_node_t *end,
+                               ast_node_t *step, bool is_to,
+                               ast_node_t *llguards, ast_node_t *block);
 
 /**
  * @brief Deallocate memory used by passed node and its children

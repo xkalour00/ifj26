@@ -5,7 +5,7 @@
  * @brief FIT VUT | IFJ Project 2026 - Implementation of AST type-checking
  * function and related functions
  *
- * @date 2026-11-26
+ * @date 2026-11-27
  */
 
 #include "ast_tc.h"
@@ -116,6 +116,7 @@ int set_recursion_flags(ast_node_t *root, symtable_t *symtable) {
     }
 
     if (check_for_recursion(func, reachable_funcs, symtable, true)) {
+      hashtable_free(reachable_funcs);
       return -1;
     }
 
@@ -138,13 +139,13 @@ int set_recursion_flags(ast_node_t *root, symtable_t *symtable) {
  */
 int push_if_not_present(stack_t *stack, char *str) {
   size_t idx = 0;
-  char *str_stack = stack_get(stack, idx++);
+  char **str_stack = stack_get(stack, idx++);
 
   // Loop while stack has something at index idx
   while (str_stack) {
     // If strings match, str is present at stack
     // and we do not push
-    if (!strcmp(str, str_stack)) {
+    if (!strcmp(str, *str_stack)) {
       return 0;
     }
     str_stack = stack_get(stack, idx++);
@@ -272,11 +273,6 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     // Type was already set when the node was created
     break;
   case AST_LEAF:
-    if (!line->data.leaf->declaration->data.declaration.value) {
-      // This happens in function definitions, parameters
-      // are defined as definitions with .value == NULL
-      return 0;
-    }
     if (line->data.leaf->is_function) {
       // I don't think this should happen
       return -1;
@@ -306,6 +302,56 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     }
     line->ret_type = RETURN_UNIT;
     break;
+  case AST_FOR_LOOP:
+    if (walk_tree(parent, line->data.for_loop.gen_start, symtable)) {
+      return -1;
+    }
+    return_type_t g_start =
+        line->data.for_loop.gen_start->data.declaration.return_type;
+    if (g_start != RETURN_INT) {
+      print_error("generator start must be of integer type");
+      return -1;
+    }
+    if (walk_tree(parent, line->data.for_loop.gen_end, symtable)) {
+      return -1;
+    }
+    return_type_t g_end = line->data.for_loop.gen_end->ret_type;
+    if (g_end != RETURN_INT) {
+      print_error("generator end must be of integer type");
+      return -1;
+    }
+    if (walk_tree(parent, line->data.for_loop.gen_step, symtable)) {
+      return -1;
+    }
+    ast_node_t *g_step = line->data.for_loop.gen_step;
+    if (!g_step && g_step->ret_type != RETURN_INT) {
+      print_error("generator step must be of integer type");
+      return -1;
+    }
+    if (!g_step && g_step->data.integer == 0) {
+      print_error("generator step must not be zero");
+      return -1;
+    }
+    if (walk_tree(parent, line->data.for_loop.llist_guards, symtable)) {
+      return -1;
+    }
+    ast_node_t *guard_ll = line->data.for_loop.llist_guards;
+    if (guard_ll) {
+      ast_node_t *guard = guard_ll->data.llist.begin;
+      while (guard) {
+        if (guard->data.llist_item.node->ret_type != RETURN_BOOLEAN) {
+          print_error("guard must not be boolean");
+          return -1;
+        }
+        guard = guard->data.llist_item.next;
+      }
+    }
+
+    if (walk_tree(parent, line->data.for_loop.code_block, symtable)) {
+      return -1;
+    }
+    line->ret_type = RETURN_UNIT;
+    break;
   case AST_IF_STATEMENT:
     if (walk_tree(parent, line->data.if_statement.condition, symtable)) {
       return -1;
@@ -314,15 +360,56 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
       print_error("condition must have a boolean value");
       return -1;
     }
-    if (walk_tree(parent, line->data.if_statement.if_block, symtable)) {
+    ast_node_t *if_blk = line->data.if_statement.if_block;
+    ast_node_t *else_blk = line->data.if_statement.else_block;
+    ast_node_t *elsifs = line->data.if_statement.llist_else_if;
+    if (walk_tree(parent, if_blk, symtable)) {
       return -1;
     }
-    if (walk_tree(parent, line->data.if_statement.else_block, symtable)) {
+    if (walk_tree(parent, else_blk, symtable)) {
       return -1;
     }
-    line->ret_type = RETURN_UNIT;
-    // TODO: In CONTROL extension, it can become
-    // other type than Unit
+    if (walk_tree(parent, elsifs, symtable)) {
+      return -1;
+    }
+    if (!if_blk || !else_blk) {
+      line->ret_type = RETURN_UNIT;
+      return 0;
+    }
+    bool ifb_line = if_blk->data.llist.begin == if_blk->data.llist.end;
+    bool else_line = else_blk->data.llist.begin == else_blk->data.llist.end;
+    bool is_exp = ifb_line && else_line && else_blk && !elsifs;
+    return_type_t ifb_ret = if_blk->data.llist.begin->ret_type;
+    return_type_t else_ret = else_blk->data.llist.begin->ret_type;
+    if (is_exp) {
+      if (ifb_ret == RETURN_INT && else_ret == RETURN_DOUBLE) {
+        if_blk->data.llist.begin->to_double = true;
+        line->ret_type = RETURN_DOUBLE;
+      } else if (ifb_ret == RETURN_DOUBLE && else_ret == RETURN_INT) {
+        else_blk->data.llist.begin->to_double = true;
+        line->ret_type = RETURN_DOUBLE;
+      } else if (ifb_ret == else_ret) {
+        line->ret_type = ifb_ret;
+      } else {
+        print_error("if-else expression must be of the same type or castable "
+                    "to one type");
+        return -1;
+      }
+    } else {
+      line->ret_type = RETURN_UNIT;
+    }
+    break;
+  case AST_ELSE_IF:
+    if (walk_tree(parent, line->data.else_if.cond, symtable)) {
+      return -1;
+    }
+    if (line->data.else_if.cond->ret_type != RETURN_BOOLEAN) {
+      print_error("condition must have a boolean value");
+      return -1;
+    }
+    if (walk_tree(parent, line->data.else_if.else_if_block, symtable)) {
+      return -1;
+    }
     break;
   case AST_FUNC_DEF:
     // This is to prevent recursive functions from getting called repeatedly
@@ -341,7 +428,7 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     if (!line->data.func_def.has_return_node &&
         line->data.func_def.return_type == RETURN_UNKNOWN) {
       ast_node_t *llist = line->data.func_def.tree_list;
-      line->ret_type = llist->data.llist.end->ret_type;
+      line->ret_type = llist->data.llist.end->data.llist_item.node->ret_type;
     }
     break;
   case AST_FUNC_CALL:
@@ -355,13 +442,40 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     if (walk_tree(parent, sym->declaration, symtable)) {
       return -1;
     }
-    // TODO: we must check for type consistency
-    // in parameters (and count of them!), throw error or set implicit
-    // type conversion
-    // TODO: must check for return type of
-    // func_call's func_def. if set, set it to
-    // that value, if not, call walk_tree on the
-    // func_def
+    // Check parameter types
+    if (line->data.func_call.parameters) {
+      if (!sym->declaration->data.func_def.parameters) {
+        print_error(
+            "number of parameters in function call do not match function "
+            "declaration");
+        return -1;
+      }
+
+      ast_node_t *param_call =
+          line->data.func_call.parameters->data.llist.begin;
+      ast_node_t *param_def =
+          sym->declaration->data.func_def.parameters->data.llist.begin;
+      while (param_call && param_def) {
+        ast_node_t *pc = param_call->data.llist_item.node;
+        ast_node_t *pd = param_def->data.llist_item.node;
+
+        if (pc->ret_type == RETURN_INT &&
+            pd->data.declaration.return_type == RETURN_DOUBLE) {
+          pc->to_double = true;
+        } else if (pc->ret_type != pd->data.declaration.return_type) {
+          print_error("function call paramter types do not match");
+          return -1;
+        }
+        param_call = param_call->data.llist_item.next;
+        param_def = param_def->data.llist_item.next;
+      }
+      if (param_call || param_def) {
+        print_error(
+            "number of parameters in function call do not match function "
+            "declaration");
+        return -1;
+      }
+    }
     line->ret_type = sym->declaration->ret_type;
     break;
   case AST_ROOT:
@@ -383,7 +497,7 @@ int walk_tree(ast_node_t *parent, ast_node_t *line, symtable_t *symtable) {
     }
     return_type_t dec_ret = line->data.declaration.return_type;
     return_type_t val_ret;
-    if (!line->data.declaration.value) {
+    if (line->data.declaration.value) {
       val_ret = line->data.declaration.value->ret_type;
     } else {
       val_ret = line->data.declaration.return_type;
@@ -435,10 +549,21 @@ int walk_tree_meta(ast_node_t *parent, ast_node_t *line) {
     walk_tree_meta(parent, line->data.while_statement.condition);
     walk_tree_meta(parent, line->data.while_statement.while_block);
     break;
+  case AST_FOR_LOOP:
+    walk_tree_meta(parent, line->data.for_loop.gen_start);
+    walk_tree_meta(parent, line->data.for_loop.gen_end);
+    walk_tree_meta(parent, line->data.for_loop.gen_step);
+    walk_tree_meta(parent, line->data.for_loop.llist_guards);
+    walk_tree_meta(parent, line->data.for_loop.code_block);
+    break;
   case AST_IF_STATEMENT:
     walk_tree_meta(parent, line->data.if_statement.condition);
     walk_tree_meta(parent, line->data.if_statement.if_block);
     walk_tree_meta(parent, line->data.if_statement.else_block);
+    break;
+  case AST_ELSE_IF:
+    walk_tree_meta(parent, line->data.else_if.cond);
+    walk_tree_meta(parent, line->data.else_if.else_if_block);
     break;
   case AST_FUNC_DEF:
     walk_tree_meta(line, line->data.func_def.tree_list);

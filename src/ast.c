@@ -4,7 +4,7 @@
  * @author Radek Kalous (xkalour00)
  * @brief FIT VUT | IFJ Project 2026 - Implementation of an abstract syntax tree
  *
- * @date 2026-11-26
+ * @date 2026-11-27
  */
 
 #include "ast.h"
@@ -112,6 +112,9 @@ ast_node_t *make_binary_tree(ast_binary_type_t bin_op, ast_node_t *left,
   case AST_GEQUAL:
   case AST_LESS:
   case AST_GREATER:
+  case AST_NOT:
+  case AST_AND:
+  case AST_OR:
     node->data.binary.binary_class = AST_BIN_LOGIC;
     break;
   }
@@ -120,7 +123,7 @@ ast_node_t *make_binary_tree(ast_binary_type_t bin_op, ast_node_t *left,
 }
 
 ast_node_t *make_if_else_tree(ast_node_t *cond, ast_node_t *if_block,
-                              ast_node_t *else_block) {
+                              ast_node_t *elsifs, ast_node_t *else_block) {
   ast_node_t *node = malloc(sizeof(ast_node_t));
 
   if (!node) {
@@ -132,6 +135,23 @@ ast_node_t *make_if_else_tree(ast_node_t *cond, ast_node_t *if_block,
   node->data.if_statement.condition = cond;
   node->data.if_statement.if_block = if_block;
   node->data.if_statement.else_block = else_block;
+  node->data.if_statement.llist_else_if = elsifs;
+  node->to_double = false;
+
+  return node;
+}
+
+ast_node_t *make_else_if_node(ast_node_t *cond, ast_node_t *block) {
+  ast_node_t *node = malloc(sizeof(ast_node_t));
+
+  if (!node) {
+    return NULL;
+  }
+
+  node->type = AST_ELSE_IF;
+  node->ret_type = RETURN_UNKNOWN;
+  node->data.else_if.cond = cond;
+  node->data.else_if.else_if_block = block;
   node->to_double = false;
 
   return node;
@@ -148,6 +168,29 @@ ast_node_t *make_while_tree(ast_node_t *cond, ast_node_t *while_block) {
   node->ret_type = RETURN_UNKNOWN;
   node->data.while_statement.condition = cond;
   node->data.while_statement.while_block = while_block;
+  node->to_double = false;
+
+  return node;
+}
+
+ast_node_t *make_for_loop_node(ast_node_t *i_node, ast_node_t *end,
+                               ast_node_t *step, bool is_to,
+                               ast_node_t *llguards, ast_node_t *block) {
+  ast_node_t *node = malloc(sizeof(ast_node_t));
+
+  if (!node) {
+    return NULL;
+  }
+
+  node->type = AST_FOR_LOOP;
+  node->ret_type = RETURN_UNKNOWN;
+  node->data.for_loop.gen_start = i_node;
+  node->data.for_loop.gen_end = end;
+  node->data.for_loop.gen_step = step;
+  node->data.for_loop.gen_is_to = is_to;
+  node->data.for_loop.llist_guards = llguards;
+  node->data.for_loop.code_block = block;
+
   node->to_double = false;
 
   return node;
@@ -272,7 +315,6 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   ast_node_t *llist = root_node->data.root.func_def_list;
 
   if (add_llist_item(llist, node)) {
-    root_node->data.root.main_func = NULL;
     stack_free(*dr_funcs);
     stack_free(*ret_nodes);
     free(func_name);
@@ -338,10 +380,22 @@ void free_tree(ast_node_t *root) {
     free_tree(root->data.while_statement.condition);
     free_tree(root->data.while_statement.while_block);
     break;
+  case AST_FOR_LOOP:
+    free_tree(root->data.for_loop.gen_start);
+    free_tree(root->data.for_loop.gen_end);
+    free_tree(root->data.for_loop.gen_step);
+    free_tree(root->data.for_loop.llist_guards);
+    free_tree(root->data.for_loop.code_block);
+    break;
   case AST_IF_STATEMENT:
     free_tree(root->data.if_statement.condition);
     free_tree(root->data.if_statement.if_block);
     free_tree(root->data.if_statement.else_block);
+    free_tree(root->data.if_statement.llist_else_if);
+    break;
+  case AST_ELSE_IF:
+    free_tree(root->data.else_if.cond);
+    free_tree(root->data.else_if.else_if_block);
     break;
   case AST_FUNC_DEF:
     free(root->data.func_def.name);
