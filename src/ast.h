@@ -116,6 +116,7 @@ typedef struct node {
       bool gen_is_to;
       struct node *llist_guards;
       struct node *code_block;
+      int codegen_id;
     } for_loop;
     struct {
       struct node *condition;

@@ -193,6 +193,7 @@ ast_node_t *make_for_loop_node(ast_node_t *i_node, ast_node_t *end,
   node->data.for_loop.gen_is_to = is_to;
   node->data.for_loop.llist_guards = llguards;
   node->data.for_loop.code_block = block;
+  node->data.for_loop.codegen_id = -1;
 
   node->to_double = false;
 
