@@ -13,8 +13,8 @@
 #include <stdio.h>
 
 typedef enum {
-    GEN_DISCARD,
-    GEN_PUSH,
+  GEN_DISCARD,
+  GEN_PUSH,
 } gen_mode;
 
 /**
