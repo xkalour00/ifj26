@@ -49,6 +49,10 @@ ast_node_t *make_node(ast_node_type_t type, void *data) {
   case AST_RETURN:
     node->data.return_node.value = data;
     break;
+  case AST_BOOLEAN:
+    node->ret_type = RETURN_BOOLEAN;
+    node->data.bool_value = *(bool *)data;
+    break;
   default:
     free(node);
     return NULL;
@@ -309,7 +313,8 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
     stack_free(*ret_nodes);
     free(func_name);
     free(node);
-    return -1;
+    // Return code as defined in specification
+    return 4;
   }
 
   ast_node_t *llist = root_node->data.root.func_def_list;
@@ -338,6 +343,7 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
   node->type = AST_DECLARATION;
   node->ret_type = RETURN_UNKNOWN;
   node->data.declaration.name = name;
+  node->data.declaration.codegen_name = NULL;
   node->data.declaration.return_type = return_type;
   node->data.declaration.value = value;
   node->to_double = false;
@@ -356,6 +362,7 @@ void free_tree(ast_node_t *root) {
   case AST_INTEGER:
   case AST_DOUBLE:
   case AST_LEAF:
+  case AST_BOOLEAN:
     break;
   case AST_STRING:
     free(root->data.str);

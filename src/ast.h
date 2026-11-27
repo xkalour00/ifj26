@@ -24,6 +24,7 @@ typedef enum {
   AST_DOUBLE,  // constant double
   AST_LEAF,    // leaf node (only ptr to symtable)
   AST_STRING,
+  AST_BOOLEAN,
   AST_BINARY, // binary operation (+,-,=,< etc.)
   AST_LINKED_LIST,
   AST_LINKED_LIST_ITEM,
