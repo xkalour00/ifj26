@@ -118,10 +118,13 @@ static int get_index(token_type_t current_token_type_parser,bool previous_operan
             current_token_type_parser == KW_DO ||
             current_token_type_parser == SP_COMMA ||
             current_token_type_parser == KW_ELSE) return 0;
-    else if(current_token_type_parser == KW_IF ||
-            current_token_type_parser == KW_TO ||
+    else if(current_token_type_parser == KW_IF) return previous_operand ? DOLLAR : I; // napr true -> (if x > 3 then ...) + 3  false -> for i <- 3 to if x then x+3
+    else if (current_token_type_parser == KW_TO ||
             current_token_type_parser == KW_BY ||
-            current_token_type_parser == KW_UNTIL)  return previous_operand ? DOLLAR : I;
+            current_token_type_parser == KW_UNTIL){
+                if(!previous_operand) fail(SYNTAX_ERROR); ////OVERIT
+                return NULL;
+            } 
     else{
         fail(SYNTAX_ERROR);
         return 0;
