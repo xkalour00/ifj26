@@ -13,7 +13,7 @@
  * @brief generates the definition of builtin print function
  */
 void generate_print_def(){
-    output("LABEL func_print");
+    output("LABEL _func_print");
     output("CREATEFRAME");
     output("PUSHFRAME");
     
@@ -42,7 +42,7 @@ void generate_print_def(){
  * @brief generates the definition of builtin readLine function
  */
 void generate_read_line_def(){
-    output("LABEL func_readLine");
+    output("LABEL _func_readLine");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -66,7 +66,7 @@ void generate_read_line_def(){
  * @brief generates the definition of builtin readInt function
  */
 void generate_read_int_def(){
-    output("LABEL func_readInt");
+    output("LABEL _func_readInt");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -89,7 +89,7 @@ void generate_read_int_def(){
  * @brief generates the definition of builtin readDouble function
  */
 void generate_read_double_def(){
-    output("LABEL func_readDouble");
+    output("LABEL _func_readDouble");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -112,7 +112,7 @@ void generate_read_double_def(){
  * @brief generates the definition of builtin readBoolean function
  */
 void generate_read_boolean_def(){
-    output("LABEL func_readBoolean");
+    output("LABEL _func_readBoolean");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -136,7 +136,7 @@ void generate_read_boolean_def(){
  * @brief generates the definition of builtin toStr function
  */
 void generate_to_str_def(){
-    output("LABEL func_toStr");
+    output("LABEL _func_toStr");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -181,7 +181,7 @@ void generate_to_str_def(){
  * @brief generates the definition of builtin toInt function
  */
 void generate_to_int_def(){
-    output("LABEL func_toInt");
+    output("LABEL _func_toInt");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -199,7 +199,7 @@ void generate_to_int_def(){
  * @brief generates the definition of builtin strLength function
  */
 void generate_str_length_def(){
-    output("LABEL func_strLength");
+    output("LABEL _func_strLength");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -218,7 +218,7 @@ void generate_str_length_def(){
  * @brief generates the definition of builtin subStr function
  */
 void generate_sub_str_def(){
-    output("LABEL func_subStr");
+    output("LABEL _func_subStr");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -270,7 +270,7 @@ void generate_sub_str_def(){
  * @brief generates the definition of builtin ord function
  */
 void generate_ord_def(){
-    output("LABEL func_ord");
+    output("LABEL _func_ord");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
@@ -305,7 +305,7 @@ void generate_ord_def(){
  * @brief generates the definition of builtin chr function
  */
 void generate_chr_def(){
-    output("LABEL func_chr");
+    output("LABEL _func_chr");
     output("CREATEFRAME");
     output("PUSHFRAME");
 
