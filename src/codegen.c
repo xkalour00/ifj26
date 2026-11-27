@@ -362,6 +362,9 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
       output("LABEL !else_%d", id);
       if(generate_node(node->data.if_statement.else_block, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     }
+    else{
+      output("PUSHS nil@nil");
+    }
     output("LABEL !end_if_%d", id);
 
     break;
