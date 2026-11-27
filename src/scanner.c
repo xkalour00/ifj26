@@ -76,6 +76,8 @@ typedef enum scanner_state {
   S_MULTILINE_CMNT_END,
   S_MULTILINE_CMNT_EOL,
   S_INDENT,
+  S_OR,
+  S_AND,
 } scanner_state_t;
 
 typedef struct {
@@ -155,29 +157,16 @@ static int get_indentation() {
  * @return true if the string is a keyword, false otherwise
  */
 static bool is_keyword(const char *str, token_type_t *type) {
-  static const keyword_mapping_t keywords[] = {{"def", KW_DEF},
-                                               {"do", KW_DO},
-                                               {"Double", KW_DOUBLE},
-                                               {"else", KW_ELSE},
-                                               {"if", KW_IF},
-                                               {"import", KW_IMPORT},
-                                               {"Int", KW_INT},
-                                               {"return", KW_RETURN},
-                                               {"String", KW_STRING},
-                                               {"then", KW_THEN},
-                                               {"Unit", KW_UNIT},
-                                               {"val", KW_VAL},
-                                               {"var", KW_VAR},
-                                               {"while", KW_WHILE},
-                                               {"Boolean", KW_BOOLEAN},
-                                               {"case", KW_CASE},
-                                               {"class", KW_CLASS},
-                                               {"extension", KW_EXTENSION},
-                                               {"for", KW_FOR},
-                                               {"List", KW_LIST},
-                                               {"match", KW_MATCH},
-                                               {"type", KW_TYPE},
-                                               {NULL, 0}};
+  static const keyword_mapping_t keywords[] = {
+      {"def", KW_DEF},   {"do", KW_DO},         {"Double", KW_DOUBLE},
+      {"else", KW_ELSE}, {"if", KW_IF},         {"import", KW_IMPORT},
+      {"Int", KW_INT},   {"return", KW_RETURN}, {"String", KW_STRING},
+      {"then", KW_THEN}, {"Unit", KW_UNIT},     {"val", KW_VAL},
+      {"var", KW_VAR},   {"while", KW_WHILE},   {"Boolean", KW_BOOLEAN},
+      {"case", KW_CASE}, {"class", KW_CLASS},   {"extension", KW_EXTENSION},
+      {"for", KW_FOR},   {"List", KW_LIST},     {"match", KW_MATCH},
+      {"type", KW_TYPE}, {"true", KW_TRUE},     {"false", KW_FALSE},
+      {NULL, 0}};
 
   for (int i = 0; keywords[i].keyword != NULL; i++) {
     if (strcmp(str, keywords[i].keyword) == 0) {
@@ -349,6 +338,10 @@ int get_next_token(token_t **token) {
           state = S_LESS_OR_EQUAL;
         } else if (c == '=') {
           state = S_ASSIGN_OR_EQUAL;
+        } else if (c == '|') {
+          state = S_OR;
+        } else if (c == '&') {
+          state = S_AND;
         } else if (c == ',') {
           return return_token(token, SP_COMMA);
         } else if (c == ':') {
@@ -403,9 +396,10 @@ int get_next_token(token_t **token) {
     case S_NOT_EQUAL:
       if (c == '=') {
         return return_token(token, OP_NOT_EQUAL);
-      } else
-        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
-                            scanner_vars->line_number);
+      } else {
+        ungetc(c, stdin);
+        return return_token(token, OP_NOT);
+      }
       break;
     case S_GREATER_OR_EQUAL:
       if (c == '=') {
@@ -418,6 +412,8 @@ int get_next_token(token_t **token) {
     case S_LESS_OR_EQUAL:
       if (c == '=') {
         return return_token(token, OP_LESS_OR_EQUAL);
+      } else if (c == '-') {
+        return return_token(token, SP_ARROW);
       } else {
         ungetc(c, stdin);
         return return_token(token, OP_LESS);
@@ -985,6 +981,22 @@ int get_next_token(token_t **token) {
       } else
         return return_error(SCANNER_LEXICAL_ERROR, "invalid indentation",
                             scanner_vars->line_number);
+      break;
+    case S_OR:
+      if (c == '|') {
+        return return_token(token, OP_OR);
+      } else {
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
+      }
+      break;
+    case S_AND:
+      if (c == '&') {
+        return return_token(token, OP_AND);
+      } else {
+        return return_error(SCANNER_LEXICAL_ERROR, "invalid character",
+                            scanner_vars->line_number);
+      }
       break;
     }
   }

@@ -41,6 +41,9 @@ typedef enum token_type {
   KW_LIST,
   KW_MATCH,
   KW_TYPE,
+  // our keywords: (not from specification)
+  KW_TRUE,
+  KW_FALSE,
   // operators:
   OP_PLUS,
   OP_MINUS,
@@ -53,6 +56,12 @@ typedef enum token_type {
   OP_LESS_OR_EQUAL,
   OP_GREATER,
   OP_GREATER_OR_EQUAL,
+  // boolthen operators:
+  OP_NOT,
+  OP_AND,
+  OP_OR,
+  // control symbols:
+  SP_ARROW,
   // special symbols:
   SP_INDENT,
   SP_DEDENT,
