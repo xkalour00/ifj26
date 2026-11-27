@@ -13,15 +13,6 @@
 #include "symtable.h"
 
 /**
- * @brief Fill AST with metadata for TC
- *
- * @param parent Current function definition that is traversed
- * @param line Current line that is traversed
- * @return int
- */
-int walk_tree_meta(ast_node_t *parent, ast_node_t *line);
-
-/**
  * @brief Perform type checking on whole AST
  *
  * @param root Root node of the AST

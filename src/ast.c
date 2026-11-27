@@ -8,7 +8,6 @@
  */
 
 #include "ast.h"
-#include "ast_tc.h"
 #include "stack.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -268,8 +267,12 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
     return -1;
   }
 
+  if (return_type == RETURN_NONE) {
+    return_type = RETURN_UNKNOWN;
+  }
+
   node->type = AST_FUNC_DEF;
-  node->ret_type = RETURN_UNKNOWN;
+  node->ret_type = return_type;
   node->data.func_def.return_type = return_type;
   node->data.func_def.possible_recursion = false;
   node->data.func_def.has_return_node = false;
@@ -283,22 +286,12 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
 
   // Initialize stack that holds dynamically allocated strings
   if (stack_init(dr_funcs, sizeof(char *))) {
-    free(func_name);
     free(node);
     return -1;
   }
 
   if (stack_init(ret_nodes, sizeof(ast_node_t *))) {
     stack_free(*dr_funcs);
-    free(func_name);
-    free(node);
-    return -1;
-  }
-
-  if (walk_tree_meta(NULL, node)) {
-    stack_free(*dr_funcs);
-    stack_free(*ret_nodes);
-    free(func_name);
     free(node);
     return -1;
   }
@@ -311,18 +304,15 @@ int add_func_def_tree(ast_node_t *root_node, return_type_t return_type,
   else if (is_main && root_node->data.root.main_func) {
     stack_free(*dr_funcs);
     stack_free(*ret_nodes);
-    free(func_name);
     free(node);
     // Return code as defined in specification
     return 4;
   }
 
   ast_node_t *llist = root_node->data.root.func_def_list;
-
   if (add_llist_item(llist, node)) {
     stack_free(*dr_funcs);
     stack_free(*ret_nodes);
-    free(func_name);
     free(node);
     return -1;
   }
@@ -338,6 +328,10 @@ ast_node_t *make_declaration_node(char *name, return_type_t return_type,
 
   if (!node) {
     return NULL;
+  }
+
+  if (return_type == RETURN_NONE) {
+    return_type = RETURN_UNKNOWN;
   }
 
   node->type = AST_DECLARATION;
@@ -421,6 +415,7 @@ void free_tree(ast_node_t *root) {
   case AST_DECLARATION:
     free_tree(root->data.declaration.value);
     free(root->data.declaration.name);
+    free(root->data.declaration.codegen_name);
     break;
   case AST_UNIT:
     break;
