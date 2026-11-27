@@ -6,6 +6,7 @@
  * @date 2026-11-23
  */
 
+#include "ast.h"
 #include "symtable.h"
 #include "stack.h"
 #include <string.h>

@@ -165,7 +165,7 @@ static bool is_keyword(const char *str, token_type_t *type) {
       {"var", KW_VAR},   {"while", KW_WHILE},   {"Boolean", KW_BOOLEAN},
       {"case", KW_CASE}, {"class", KW_CLASS},   {"extension", KW_EXTENSION},
       {"for", KW_FOR},   {"List", KW_LIST},     {"match", KW_MATCH},
-      {"type", KW_TYPE}, {"true", KW_TRUE},     {"false", KW_FALSE},
+      {"type", KW_TYPE}, {"true", KW_TRUE},     {"false", KW_FALSE}, {"by", KW_BY}, {"to", KW_TO}, {"until", KW_UNTIL},
       {NULL, 0}};
 
   for (int i = 0; keywords[i].keyword != NULL; i++) {

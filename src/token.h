@@ -44,6 +44,9 @@ typedef enum token_type {
   // our keywords: (not from specification)
   KW_TRUE,
   KW_FALSE,
+  KW_BY,
+  KW_TO,
+  KW_UNTIL,
   // operators:
   OP_PLUS,
   OP_MINUS,
