@@ -1,40 +1,35 @@
-#####
-#
-# @file Makefile
-# @author Radek Kalous (xkalour00)
-# @brief FIT VUT | IFJ Project 2026 - Makefile for the compiler
-# @date 2026-11-17
-#
-#####
+# --- FIT VUT
+# IFJ Project 2026
+# Author: Filip Obermajer / xobermf00
+# Date: 2026-11-20
 
-ARCHIVE_NAME = xkalour00
+CC           = gcc
+CFLAGS       = -std=c11 -pedantic -Wall -Wextra -Werror
+TARGET       = ifj26-compiler
+LOGIN        = xkalour00
 
-CC = gcc
-CFLAGS = -std=c11 -pedantic -Wall -Wextra -fsanitize=address
-LDFLAGS += -fsanitize=address
+SRC_DIR      = src
+SRC_FILES    = $(wildcard $(SRC_DIR)/*.c)
+HEADER_FILES = $(wildcard $(SRC_DIR)/*.h)
+OBJS         = $(SRC_FILES:.c=.o)
 
-BUILD_PATH = build
+.PHONY: all clean check pack
 
-SOURCES = src
-# AST test sources
-AST_TEST_SRC = test/ast_test_nodes.c
+all: $(TARGET)
 
-.PHONY: clean pack
-default_target: all
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) -o $@
 
-test_ast:
-	@mkdir -p $(BUILD_PATH)
-	$(CC) $(CFLAGS) -g $(SOURCES)/* $(AST_TEST_SRC) -o $(BUILD_PATH)/$@
+$(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(HEADER_FILES)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-	@# execute built program
-	@echo; echo "##### Plain output #####"; echo
-	./$(BUILD_PATH)/$@
-	@echo; echo "##### Valgrind output #####"; echo
-	valgrind -s --leak-check=full ./$(BUILD_PATH)/$@
-all:
-	@mkdir -p $(BUILD_PATH)
-	@echo "TODO make all"
-pack:
-	@echo "TODO make pack"
 clean:
+	rm -f $(TARGET) $(OBJS) $(LOGIN).zip
+
+check: pack
+	./is_it_ok.sh $(LOGIN).zip
+
+pack:
+	zip -r $(LOGIN).zip Makefile dokumentace.pdf rozdeleni rozsireni $(SRC_FILES) $(HEADER_FILES)
+
 	rm -rf $(BUILD_PATH)*
