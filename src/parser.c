@@ -27,18 +27,6 @@ static ast_node_t *root;
 symtable_t *symtable = NULL;
 
 
-static const char *tok_name(token_type_t t){
-    static const char *n[] = {"IDENTIFIER","INTEGER","DOUBLE","STRING","KW_DEF","KW_DO","KW_DOUBLE",
-        "KW_ELSE","KW_IF","KW_IMPORT","KW_INT","KW_RETURN","KW_STRING","KW_THEN","KW_UNIT","KW_VAL",
-        "KW_VAR","KW_WHILE","KW_BOOLEAN","KW_CASE","KW_CLASS","KW_EXTENSION","KW_FOR","KW_LIST",
-        "KW_MATCH","KW_TYPE","KW_FALSE","KW_TRUE","OP_NOT","OP_AND","OP_OR","KW_BY","KW_UNTIL","KW_TO",
-        "OP_PLUS","OP_MINUS","OP_MULTIPLY","OP_DIVIDE","OP_EQUAL","OP_NOT_EQUAL","OP_ASSIGN","OP_LESS",
-        "OP_LESS_OR_EQUAL","OP_GREATER","OP_GREATER_OR_EQUAL","SP_INDENT","SP_DEDENT","SP_EOL","SP_EOF",
-        "SP_MAIN","SP_COLON","SP_COMMA","SP_DOT","SP_UNDERSCORE","SP_OPENING_PARENTHESIS",
-        "SP_CLOSING_PARENTHESIS","SP_ARROW"};
-    return n[t];
-}
-
 
 
 
@@ -64,7 +52,7 @@ static ast_node_t* parse_return_value(void);
 
 static ast_node_t* parse_while(void);
 static ast_node_t* parse_id_expr_or_funcall(void);
-static ast_node_t* parse_body(void);
+static ast_node_t* parse_body(bool is_expr);
 static ast_node_t* parse_else_part(bool is_expr,ast_node_t*elsifs);
 static ast_node_t* parse_else_if_or_else(bool is_expr,ast_node_t* elsifs);
 static ast_node_t* parse_optional_eol(void);
@@ -78,13 +66,6 @@ static ast_node_t* parse_for_conditions(ast_node_t* guards);
 
 
 
-
-// char* make_unique_name(char* name){
-
-//     symbol_t* symbol = symtable_find(symtable,name);
-//     if(!symbol) fail(USING_NOT_DEFINED_VARIABLE);
-//     return str_dup(symbol->declaration->data.declaration.name);
-// }
 
 
 void fail(int code){ 
@@ -107,7 +88,7 @@ char *str_dup(const char *s) {
 }
 
 void consume(void){
-    prev_token_type_parser = current_token_type_parser;
+    prev_token_type_parser = current_token_type_parser; // si pamatam pre vyrazovy viacridakovy if (in_expr == true)
   if(current_token_parser){ 
     token_free(current_token_parser); 
     current_token_parser = NULL;
@@ -116,7 +97,7 @@ void consume(void){
   if(get_next_token(&current_token_parser) != 0){ 
     fail(LEXICAL_ERROR);
     }
-  fprintf(stderr, "token: %s\n", tok_name(current_token_type_parser));
+  //fprintf(stderr, "token: %s\n", tok_name(current_token_type_parser));
   token_get_type(current_token_parser, &current_token_type_parser);
 }   
 
@@ -554,6 +535,15 @@ static ast_node_t* parse_return_value(){
     return NULL;
 }
 
+
+/**
+ * @brief parses <VAL> -> <OPTIONAL_EOL> -> SP_EOL
+                          <OPTIONAL_EOL> -> epsilon
+ * @return NULL  
+ */
+
+
+
 static ast_node_t* parse_optional_eol(void){
     switch(current_token_type_parser){
         case SP_EOL:
@@ -583,6 +573,13 @@ static ast_node_t* parse_optional_eol(void){
     }
 
 }
+
+/**
+ * @brief parse <ELSE_BODY> -> <EXPR> SP_EOL
+                <ELSE_BODY> -> SP_EOL <INDENTED_BLOCK>
+ * @return ast_node_t* linked list of else block  
+ */
+
 static ast_node_t* parse_else_body(bool is_expr){
     switch(current_token_type_parser){
             case IDENTIFIER:
@@ -610,6 +607,15 @@ static ast_node_t* parse_else_body(bool is_expr){
     }               
 }
 
+
+/**
+ * @brief parse <GUARDS> -> KW_TO <EXPR> <BY_OPTIONAL>
+                <GUARDS> -> KW_UNTIL <EXPR> 
+ * @return NULL  
+ */
+
+
+
 static void parse_guards(ast_node_t **end, ast_node_t** by, bool *is_to){
     *by = NULL;
     switch(current_token_type_parser){
@@ -630,6 +636,13 @@ static void parse_guards(ast_node_t **end, ast_node_t** by, bool *is_to){
     }
 }
 
+/**
+ * @brief parse <BY_OPTIONAL> -> KW_BY <EXPR>
+                <BY_OPTIONAL> -> epsilon  
+ * @return NULL  
+ */
+
+
 static ast_node_t* parse_by_optional(void){
     switch(current_token_type_parser){
         case KW_BY:
@@ -643,6 +656,13 @@ static ast_node_t* parse_by_optional(void){
             return NULL;
     }
 }
+
+
+/**
+ * @brief parse <INDENTED_FOR> -> INDENT IDENTIFIER ARROW <EXPR> <GUARDS> EOL <FOR_CONDITIONS> DEDENT KW_DO <FOR_BODY>
+        
+ * @return ast_node_t* type of for_loop
+ */
 
 
 static ast_node_t* parse_indented_for(void){
@@ -675,6 +695,16 @@ static ast_node_t* parse_indented_for(void){
     return n;
 }
 
+/**
+ * @brief parse <FOR_CONDITIONS> -> KW_IF <EXPR> EOL <FOR_CONDITIONS>
+                <FOR_CONDITIONS> -> epsilon
+
+ * @return ast_node_t* linked list with guards
+ */
+
+
+
+
 static ast_node_t* parse_for_conditions(ast_node_t* guards){
     switch(current_token_type_parser){
         case KW_IF:
@@ -690,6 +720,15 @@ static ast_node_t* parse_for_conditions(ast_node_t* guards){
             return NULL;
     }
 }
+
+/**
+ * @brief parse <FOR> -> IDENTIFIER ARROW <EXPR> <GUARDS> KW_DO <FOR_BODY>
+                <FOR> -> EOL <INDENTED_FOR>
+
+ * @return ast_node_t* type of for_loop
+ */
+
+
 
 static ast_node_t* parse_for(){
     switch(current_token_type_parser){
@@ -730,6 +769,14 @@ static ast_node_t* parse_for(){
         
 }
 
+/**
+ * @brief parse <FOR_BODY>  -> <EXPR> SP_EOL
+                <FOR_BODY>  -> SP_EOL <INDENTED_BLOCK>
+
+ * @return ast_node_t* type of linked list
+ */
+
+
 static ast_node_t* parse_for_body(void){
     switch(current_token_type_parser){
             case SP_EOL:
@@ -745,6 +792,7 @@ static ast_node_t* parse_for_body(void){
             case OP_NOT:
             case KW_TRUE:
             case KW_FALSE:
+            case KW_IF:
                 ast_node_t *block = init_llist();
                 if(!block) fail(MALLOC_FAIL);
                 add_llist_item(block,parse_precedence(NULL));
@@ -756,12 +804,30 @@ static ast_node_t* parse_for_body(void){
         }
 }
 
-static ast_node_t* parse_body(void){
+
+/**
+ * @brief parse <BODY> -> <EXPR> <OPTIONAL_EOL>
+                <BODY> -> SP_EOL <INDENTED_BLOCK>
+
+ * @return ast_node_t* type of linked list
+ */
+
+
+static ast_node_t* parse_body(bool is_expr){
         switch(current_token_type_parser){
             case SP_EOL:
                 consume();
                 return parse_indented_block();
-                
+            
+             case KW_IF:
+                if(!is_expr){                    
+                    ast_node_t *if_block = init_llist();
+                    if(!if_block) fail(MALLOC_FAIL);
+                    add_llist_item(if_block, parse_if(false));
+                    return if_block;
+                }    
+
+
             case IDENTIFIER:
             case SP_OPENING_PARENTHESIS:
             case OP_MINUS:
@@ -782,13 +848,23 @@ static ast_node_t* parse_body(void){
         }
 }
 
+/**
+ * @brief parse <ELSE_IF_OR_ELSE> -> KW_IF <EXPR> KW_THEN <BODY> <ELSE_PART>
+                <ELSE_IF_OR_ELSE> -> <ELSE_BODY>
+   @param is_expr if the else is in expr
+   @param elsifs linked lists of elsifs
+ * @return ast_node_t* else_part
+ */
+
+
+
 static ast_node_t* parse_else_if_or_else(bool is_expr,ast_node_t* elsifs){
     switch(current_token_type_parser){
         case KW_IF:
             consume();
             ast_node_t* cond = parse_precedence(NULL);
             expect(KW_THEN);
-            ast_node_t *block = parse_body();
+            ast_node_t *block = parse_body(is_expr);
             ast_node_t *elsif = make_else_if_node(cond,block);
             if(!elsif) fail(MALLOC_FAIL);
             add_llist_item(elsifs,elsif);
@@ -811,6 +887,14 @@ static ast_node_t* parse_else_if_or_else(bool is_expr,ast_node_t* elsifs){
             return NULL;
     }
 }
+
+/**
+ * @brief parse <ELSE_PART> -> KW_ELSE <ELSE_IF_OR_ELSE>
+                <ELSE_PART> -> epsilon
+
+ * @return ast_node_t* else_part
+ */
+
 
 static ast_node_t* parse_else_part(bool is_expr, ast_node_t* elsifs){
 
@@ -852,7 +936,7 @@ ast_node_t* parse_if(bool is_expr){
     expect(KW_IF);
     ast_node_t* cond = parse_precedence(NULL);
     expect(KW_THEN);
-    ast_node_t* if_block = parse_body();
+    ast_node_t* if_block = parse_body(is_expr);
     ast_node_t* elsifs = init_llist();
     if(!elsifs) fail(MALLOC_FAIL);
     ast_node_t* else_block = parse_else_part(is_expr,elsifs);
@@ -1024,6 +1108,11 @@ static ast_node_t* parse_rest_block(ast_node_t* block){
     return NULL;
 }
 
+
+/**
+ * @brief parses the whole program
+ * @return root ast_node_t* of the whole AST
+ */
 
 ast_node_t* parse(void) {
     consume();
