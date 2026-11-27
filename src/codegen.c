@@ -75,7 +75,7 @@ int generate_code(ast_node_t *root, FILE *out) {
   // generates all functions
   for (ast_node_t *item = root->data.root.func_def_list->data.llist.begin;
        item != NULL; item = item->data.llist_item.next) {
-    if (generate_node(item->data.llist_item.node, GEN_DISCARD) != 0) {
+    if (generate_node(item->data.llist_item.node, GEN_DISCARD) != GEN_SUCCESS) {
       hashtable_free(hashtable);
       hashtable = NULL;
       return INTERNAL_ERR;
@@ -119,12 +119,15 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
   case AST_BOOLEAN:
     output("PUSHS bool@%s", node->data.bool_value ? "true" : "false");
     break;
+  case AST_UNIT:
+    output("PUSHS nil@nil");
+    break;
 
   // assignment is special from the rest, does not need to generate left node
   case AST_BINARY: {
     int id = labelCounter++;
     if (node->data.binary.binary_type == AST_ASSIGNMENT) {
-      generate_node(node->data.binary.right, GEN_PUSH);
+      if(generate_node(node->data.binary.right, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("POPS LF@%s", node->data.binary.left->data.leaf->
                     declaration->data.declaration.codegen_name);
       if (mode == GEN_PUSH)
@@ -134,11 +137,11 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
 
     // short circuit evaluation of and
     if (node->data.binary.binary_type == AST_AND) {
-      generate_node(node->data.binary.left, GEN_PUSH);
+      if(generate_node(node->data.binary.left, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("PUSHS bool@false");
       output("JUMPIFEQS !and_short_circuit_%d", id);
       output("PUSHS bool@true");
-      generate_node(node->data.binary.right, GEN_PUSH);
+      if(generate_node(node->data.binary.right, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("ANDS");
       output("JUMP !and_end_%d", id);
       output("LABEL !and_short_circuit_%d", id);
@@ -151,11 +154,11 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
 
     // short circuit evaluation of or
     if (node->data.binary.binary_type == AST_OR) {
-      generate_node(node->data.binary.left, GEN_PUSH);
+      if(generate_node(node->data.binary.left, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("PUSHS bool@true");
       output("JUMPIFEQS !or_short_circuit_%d", id);
       output("PUSHS bool@false");
-      generate_node(node->data.binary.right, GEN_PUSH);
+      if(generate_node(node->data.binary.right, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("ORS");
       output("JUMP !or_end_%d", id);
       output("LABEL !or_short_circuit_%d", id);
@@ -168,8 +171,8 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
   }
 
     // preorder traversal
-    generate_node(node->data.binary.left, GEN_PUSH);
-    generate_node(node->data.binary.right, GEN_PUSH);
+    if(generate_node(node->data.binary.left, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(generate_node(node->data.binary.right, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
 
     switch (node->data.binary.binary_type) {
     case AST_ADDITION: {
@@ -200,9 +203,9 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
 
     case AST_DIVISION:
       if (node->ret_type == RETURN_INT)
-        output("DIVS");
-      else
         output("IDIVS");
+      else
+        output("DIVS");
       if (mode == GEN_DISCARD)
         output("POPS GF@&tmp");
       break;
@@ -256,16 +259,17 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
       break;
     }
     break;
+
   // function, if, else or while blocks are generated line by line where each
   // line can be a tree
   case AST_LINKED_LIST:
     for (ast_node_t *item = node->data.llist.begin; item != NULL;
          item = item->data.llist_item.next) {
       if (item == node->data.llist.end && mode == GEN_PUSH) {
-        generate_node(item->data.llist_item.node, GEN_PUSH);
+        if(generate_node(item->data.llist_item.node, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
         break;
       }
-      generate_node(item->data.llist_item.node, GEN_DISCARD);
+      if(generate_node(item->data.llist_item.node, GEN_DISCARD) != GEN_SUCCESS) return INTERNAL_ERR;
     }
     break;
 
@@ -281,17 +285,16 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
     if (node->data.func_def.parameters) {
       for (ast_node_t *item = node->data.func_def.parameters->data.llist.begin;
            item != NULL; item = item->data.llist_item.next) {
-        if (add_var(item->data.llist_item.node) != 0)
-          return INTERNAL_ERR;
+        if (add_var(item->data.llist_item.node) != GEN_SUCCESS) return INTERNAL_ERR;
         output("POPS LF@%s", item->data.llist_item.node->data.declaration.codegen_name);
       }
     }
-    collect_function_vars(node->data.func_def.tree_list);
+    if(collect_function_vars(node->data.func_def.tree_list) != GEN_SUCCESS) return INTERNAL_ERR;
     if (node->ret_type == RETURN_UNIT) {
-      generate_node(node->data.func_def.tree_list, GEN_DISCARD);
+      if(generate_node(node->data.func_def.tree_list, GEN_DISCARD) != GEN_SUCCESS) return INTERNAL_ERR;
       output("PUSHS nil@nil");
     } else {
-      generate_node(node->data.func_def.tree_list, GEN_PUSH);
+      if(generate_node(node->data.func_def.tree_list, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     }
     if (!node->data.func_def.has_return_node) {
       output("POPFRAME");
@@ -302,11 +305,9 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
 
   // pushes the last parameter first, so that 
   // first parameter is on top of the stack
-
   case AST_FUNC_CALL:
     if (node->data.func_call.parameters) {
-      push_parameters_reversed(
-          node->data.func_call.parameters->data.llist.begin);
+      push_parameters_reversed(node->data.func_call.parameters->data.llist.begin);
     }
     output("CALL _func_%s", node->data.func_call.name);
     if (mode == GEN_DISCARD)
@@ -317,11 +318,11 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
     int id = labelCounter++;
 
     output("LABEL !while_%d", id);
-    generate_node(node->data.while_statement.condition, GEN_PUSH);
+    if(generate_node(node->data.while_statement.condition, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     output("PUSHS bool@false");
     output("JUMPIFEQS !end_while_%d", id);
 
-    generate_node(node->data.while_statement.while_block, GEN_DISCARD);
+    if(generate_node(node->data.while_statement.while_block, GEN_DISCARD) != GEN_SUCCESS) return INTERNAL_ERR;
     output("JUMP !while_%d", id);
     output("LABEL !end_while_%d", id);
 
@@ -333,10 +334,10 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
   case AST_IF_STATEMENT: {
     int id = labelCounter++;
 
-    generate_node(node->data.if_statement.condition, GEN_PUSH);
+    if(generate_node(node->data.if_statement.condition, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     output("PUSHS bool@false");
     output("JUMPIFEQS !next_if_%d", id);
-    generate_node(node->data.if_statement.if_block, GEN_PUSH);
+    if(generate_node(node->data.if_statement.if_block, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     output("JUMP !end_if_%d", id);
     output("LABEL !next_if_%d", id);
 
@@ -345,11 +346,11 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
       for (ast_node_t *item =
                node->data.if_statement.llist_else_if->data.llist.begin;
            item != NULL; item = item->data.llist_item.next) {
-        generate_node(item->data.llist_item.node->data.else_if.cond, GEN_PUSH);
+        if(generate_node(item->data.llist_item.node->data.else_if.cond, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
         output("PUSHS bool@false");
         output("JUMPIFEQS !%d_end_else_if_%d", else_if_count, id);
 
-        generate_node(item->data.llist_item.node->data.else_if.else_if_block, GEN_PUSH);
+        if(generate_node(item->data.llist_item.node->data.else_if.else_if_block, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
         output("JUMP !end_if_%d", id);
         output("LABEL !%d_end_else_if_%d", else_if_count, id);
         else_if_count++;
@@ -359,7 +360,7 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
     // else block optional
     if (node->data.if_statement.else_block) {
       output("LABEL !else_%d", id);
-      generate_node(node->data.if_statement.else_block, GEN_PUSH);
+      if(generate_node(node->data.if_statement.else_block, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     }
     output("LABEL !end_if_%d", id);
 
@@ -374,39 +375,37 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
       output("RETURN");
       break;
     }
-    generate_node(node->data.return_node.value, GEN_PUSH);
+    if(generate_node(node->data.return_node.value, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
     output("POPFRAME");
     output("RETURN");
     break;
 
   case AST_DECLARATION:
     if (node->data.declaration.value != NULL) {
-      generate_node(node->data.declaration.value, GEN_PUSH);
+      if(generate_node(node->data.declaration.value, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("POPS LF@%s", node->data.declaration.codegen_name);
-      if (mode == GEN_PUSH)
-        output("PUSHS nil@nil");
     }
+    if (mode == GEN_PUSH)
+        output("PUSHS nil@nil");
   default:
     break;
 
   case AST_FOR_LOOP: {
     int id = labelCounter++;
-    generate_node(node->data.for_loop.gen_start, GEN_DISCARD);
-    generate_node(node->data.for_loop.gen_end, GEN_PUSH);
-    output("DEFVAR GF@&for_end%d", id);
-    output("POPS GF@&for_end%d", id);
-
-    output("DEFVAR GF@&for_step%d", id);
+    int loop_id = node->data.for_loop.codegen_id;
+    if(generate_node(node->data.for_loop.gen_start, GEN_DISCARD) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(generate_node(node->data.for_loop.gen_end, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
+    output("POPS LF@&for_end%d", loop_id);
 
     // step is not mandatory, standard is 1
     if (node->data.for_loop.gen_step == NULL) {
-      output("MOVE GF@&for_step%d int@1", id);
+      output("MOVE LF@&for_step%d int@1", loop_id);
     }
     // exit program if step == 0
     else {
-      generate_node(node->data.for_loop.gen_step, GEN_PUSH);
-      output("POPS GF@&for_step%d", id);
-      output("JUMPIFNEQ !for_step_is_not_0_%d GF@&for_step%d int@0", id, id);
+      if(generate_node(node->data.for_loop.gen_step, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
+      output("POPS LF@&for_step%d", loop_id);
+      output("JUMPIFNEQ !for_step_is_not_0_%d LF@&for_step%d int@0", id, loop_id);
       output("EXIT int@40");
       output("LABEL !for_step_is_not_0_%d", id);
     }
@@ -415,17 +414,17 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
 
     output("LABEL !for_loop_increment_start_%d", id);
     // increment iteration counter
-    output("ADD LF@%s LF@%s GF@&for_step%d",
+    output("ADD LF@%s LF@%s LF@&for_step%d",
            node->data.for_loop.gen_start->data.declaration.codegen_name,
-           node->data.for_loop.gen_start->data.declaration.codegen_name, id);
+           node->data.for_loop.gen_start->data.declaration.codegen_name, loop_id);
     output("LABEL !for_loop_start_%d", id);
     // check for end of for loop based on (to / until)
     if (node->data.for_loop.gen_is_to) {
-      output("GT GF@&tmp LF@%s GF@&for_end%d",
-             node->data.for_loop.gen_start->data.declaration.codegen_name, id);
+      output("GT GF@&tmp LF@%s LF@&for_end%d",
+             node->data.for_loop.gen_start->data.declaration.codegen_name, loop_id);
     } else {
-      output("LT GF@&tmp LF@%s GF@&for_end%d",
-             node->data.for_loop.gen_start->data.declaration.codegen_name, id);
+      output("LT GF@&tmp LF@%s LF@&for_end%d",
+             node->data.for_loop.gen_start->data.declaration.codegen_name, loop_id);
       output("NOT GF@&tmp GF@&tmp");
     }
     output("JUMPIFEQ !for_loop_end_%d GF@&tmp bool@true", id);
@@ -434,12 +433,12 @@ static int generate_node(ast_node_t *node, const gen_mode mode) {
     // currently only skips iteration if guard is false (check) TODO
     for (ast_node_t *item = node->data.for_loop.llist_guards->data.llist.begin;
          item != NULL; item = item->data.llist_item.next) {
-      generate_node(item->data.llist_item.node, GEN_PUSH);
+      if(generate_node(item->data.llist_item.node, GEN_PUSH) != GEN_SUCCESS) return INTERNAL_ERR;
       output("PUSHS bool@false");
       output("JUMPIFEQS !for_loop_increment_start_%d", id);
     }
 
-    generate_node(node->data.for_loop.code_block, GEN_DISCARD);
+    if(generate_node(node->data.for_loop.code_block, GEN_DISCARD) != GEN_SUCCESS) return INTERNAL_ERR;
     output("JUMP !for_loop_increment_start_%d", id);
 
     output("LABEL !for_loop_end_%d", id);
@@ -462,45 +461,49 @@ static int collect_function_vars(ast_node_t *node) {
 
   switch (node->type) {
   case AST_BINARY:
-    collect_function_vars(node->data.binary.left);
-    collect_function_vars(node->data.binary.right);
+    if(collect_function_vars(node->data.binary.left) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.binary.right) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_LINKED_LIST:
     for (ast_node_t *item = node->data.llist.begin; item != NULL;
          item = item->data.llist_item.next) {
-      collect_function_vars(item->data.llist_item.node);
+      if(collect_function_vars(item->data.llist_item.node) != GEN_SUCCESS) return INTERNAL_ERR;
     }
     break;
   case AST_FUNC_CALL:
-    collect_function_vars(node->data.func_call.parameters);
+    if(collect_function_vars(node->data.func_call.parameters) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_WHILE_LOOP:
-    collect_function_vars(node->data.while_statement.condition);
-    collect_function_vars(node->data.while_statement.while_block);
+    if(collect_function_vars(node->data.while_statement.condition) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.while_statement.while_block) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_IF_STATEMENT:
-    collect_function_vars(node->data.if_statement.condition);
-    collect_function_vars(node->data.if_statement.if_block);
-    collect_function_vars(node->data.if_statement.else_block);
+    if(collect_function_vars(node->data.if_statement.condition) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.if_statement.if_block) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.if_statement.else_block) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.if_statement.llist_else_if) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_DECLARATION:
-    if (add_var(node) != 0)
-      return INTERNAL_ERR;
-    collect_function_vars(node->data.declaration.value);
+    if (add_var(node) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.declaration.value) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_RETURN:
-    collect_function_vars(node->data.return_node.value);
+    if(collect_function_vars(node->data.return_node.value) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_ELSE_IF:
-    collect_function_vars(node->data.else_if.cond);
-    collect_function_vars(node->data.else_if.else_if_block);
+    if(collect_function_vars(node->data.else_if.cond) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.else_if.else_if_block) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   case AST_FOR_LOOP:
-    collect_function_vars(node->data.for_loop.gen_start);
-    collect_function_vars(node->data.for_loop.gen_end);
-    collect_function_vars(node->data.for_loop.gen_step);
-    collect_function_vars(node->data.for_loop.llist_guards);
-    collect_function_vars(node->data.for_loop.code_block);
+    int id = labelCounter++;
+    node->data.for_loop.codegen_id = id;
+    output("DEFVAR LF@&for_end%d", id);
+    output("DEFVAR LF@&for_step%d", id);
+    if(collect_function_vars(node->data.for_loop.gen_start) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.for_loop.gen_end) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.for_loop.gen_step) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.for_loop.llist_guards) != GEN_SUCCESS) return INTERNAL_ERR;
+    if(collect_function_vars(node->data.for_loop.code_block) != GEN_SUCCESS) return INTERNAL_ERR;
     break;
   default:
     break;
