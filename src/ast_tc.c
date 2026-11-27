@@ -32,15 +32,13 @@ typedef struct {
 static const builtin_func_t BUILTINS[] = {
     {"print", RETURN_UNIT, 1, {BUILTIN_ANY}},
     {"toStr", RETURN_STRING, 1, {BUILTIN_ANY}},
-    {"readString", RETURN_STRING, 0, {RETURN_NONE}},
-    {"readStr", RETURN_STRING, 0, {RETURN_NONE}},
+    {"readLine", RETURN_STRING, 0, {RETURN_NONE}},
     {"readInt", RETURN_INT, 0, {RETURN_NONE}},
     {"readDouble", RETURN_DOUBLE, 0, {RETURN_NONE}},
     {"readBoolean", RETURN_BOOLEAN, 0, {RETURN_NONE}},
-    {"floor", RETURN_INT, 1, {RETURN_DOUBLE}},
-    {"length", RETURN_INT, 1, {RETURN_STRING}},
-    {"substring", RETURN_STRING, 3, {RETURN_STRING, RETURN_INT, RETURN_INT}},
-    {"strcmp", RETURN_INT, 2, {RETURN_STRING, RETURN_STRING}},
+    {"toInt", RETURN_INT, 1, {RETURN_DOUBLE}},
+    {"strLength", RETURN_INT, 1, {RETURN_STRING}},
+    {"subStr", RETURN_STRING, 3, {RETURN_STRING, RETURN_INT, RETURN_INT}},
     {"ord", RETURN_INT, 2, {RETURN_STRING, RETURN_INT}},
     {"chr", RETURN_STRING, 1, {RETURN_INT}},
     {NULL, RETURN_NONE, 0, {RETURN_NONE}},
@@ -204,7 +202,7 @@ int check_for_recursion(ast_node_t *node, hashtable_t *ht, symtable_t *sym,
     if (ret == 0) {
       continue;
     } else if (ret == 1) {
-      if (hashtable_insert(ht, *func_name, NULL)) {
+      if (hashtable_insert(ht, *func_name, symbol)) {
         retcode = 99;
         return -1;
       }
