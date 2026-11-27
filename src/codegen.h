@@ -11,9 +11,6 @@
 
 #include "ast.h"
 #include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
 
 typedef enum {
     GEN_DISCARD,
@@ -25,7 +22,7 @@ typedef enum {
  * @param root Root node of AST
  * @param out Pointer to file destination
  */
-int generate_code(const ast_node_t *root, FILE *out);
+int generate_code(ast_node_t *root, FILE *out);
 
 /**
  * @brief Helper function for easier output of IFJcode26 instructions
